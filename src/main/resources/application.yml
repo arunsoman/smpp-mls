@@ -1,0 +1,112 @@
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+
+smpp:
+  default:
+    system-type: "OTA"
+    enquire-link-interval: 600000  # 600 seconds (10 minutes)
+    reconnect-delay: 5000
+    window-size: 100
+
+  operators:
+    aftel:
+      host: "localhost"
+      port: 2775
+      sessions:
+        - system-id: "aftel_client1"
+          password: "password"
+          tps: 50
+        - system-id: "aftel_client2"
+          password: "password"
+          tps: 50
+      prefixes: ["93-20", "93-25"]
+    
+    roshan:
+      host: "localhost"
+      port: 2776
+      sessions:
+        - system-id: "roshan_user1"
+          password: "password"
+          tps: 100
+        - system-id: "roshan_user2"
+          password: "password"
+          tps: 100
+      prefixes: ["93-79", "93-77", "93-72"]
+    
+    awcc:
+      host: "localhost"
+      port: 2777
+      sessions:
+        - system-id: "awcc_client1"
+          password: "password"
+          tps: 75
+      prefixes: ["93-70", "93-71"]
+    
+    mtn:
+      host: "localhost"
+      port: 2778
+      sessions:
+        - system-id: "mtn_client1"
+          password: "password"
+          tps: 90
+        - system-id: "mtn_client2"
+          password: "password"
+          tps: 90
+      prefixes: ["93-78", "93-76"]
+    
+    salaam:
+      host: "localhost"
+      port: 2779
+      sessions:
+        - system-id: "salaam_client1"
+          password: "password"
+          tps: 50
+      prefixes: ["93-74", "93-75"]
+
+  retry:
+    max-attempts: 5
+    base-delay-ms: 1000
+    max-delay-ms: 60000
+
+# Priority config sample
+priority:
+  high:
+    max-tps-percentage: 20
+    enabled: true
+
+# API Security
+api:
+  security:
+    enabled: false  # Set to true in production
+    api-key: "test-api-key-12345"  # Default key for testing
+
+# H2 Database Configuration
+spring:
+  datasource:
+    url: jdbc:h2:mem:smppdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password: password
+    driver-class-name: org.h2.Driver
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+      settings:
+        web-allow-others: false
+        trace: false
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: UTC
