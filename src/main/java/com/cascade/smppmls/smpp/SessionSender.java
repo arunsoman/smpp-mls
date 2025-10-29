@@ -3,17 +3,16 @@ package com.cascade.smppmls.smpp;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ScheduledFuture;
 
+import lombok.extern.slf4j.Slf4j;
 import org.jsmpp.bean.*;
 import org.jsmpp.session.SMPPSession;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import com.cascade.smppmls.entity.SmsOutboundEntity;
 import com.cascade.smppmls.repository.SmsOutboundRepository;
+import com.cascade.smppmls.util.SmppAddressUtil;
 
+@Slf4j
 public class SessionSender implements Runnable {
-
-    private static final Logger logger = LoggerFactory.getLogger(SessionSender.class);
 
     private final String sessionKey;
     private final SMPPSession session;
@@ -43,7 +42,7 @@ public class SessionSender implements Runnable {
         this.tokens = this.tps; // start full
         this.hpTokens = this.hpMaxPerSecond;
         
-        logger.info("[{}] SessionSender initialized: TPS={}, HP_MAX={}", sessionKey, this.tps, this.hpMaxPerSecond);
+        log.info("[{}] SessionSender initialized: TPS={}, HP_MAX={}", sessionKey, this.tps, this.hpMaxPerSecond);
     }
 
     public void setScheduledFuture(ScheduledFuture<?> future) {
@@ -61,14 +60,14 @@ public class SessionSender implements Runnable {
             tokens = Math.min(tokens + tps, tps);
             hpTokens = Math.min(hpTokens + hpMaxPerSecond, hpMaxPerSecond);
 
-            logger.debug("[{}] Tick: tokens={}, hpTokens={}", sessionKey, tokens, hpTokens);
+            log.debug("[{}] Tick: tokens={}, hpTokens={}", sessionKey, tokens, hpTokens);
 
             // first send HP messages up to hpMaxPerSecond
             int toSendHp = (int)Math.floor(hpTokens);
             if (toSendHp > 0) {
                 var page = outboundRepository.findByStatusAndSessionIdAndPriority("QUEUED", sessionKey, "HIGH", org.springframework.data.domain.PageRequest.of(0, toSendHp));
                 long hpQueued = page.getTotalElements();
-                logger.debug("[{}] HP check: toSend={}, queued={}", sessionKey, toSendHp, hpQueued);
+                log.debug("[{}] HP check: toSend={}, queued={}", sessionKey, toSendHp, hpQueued);
                 
                 int hpSent = 0;
                 for (SmsOutboundEntity e : page) {
@@ -79,7 +78,7 @@ public class SessionSender implements Runnable {
                     if (tokens <= 0.0) break;
                 }
                 if (hpSent > 0) {
-                    logger.info("[{}] Submitted {} HP messages", sessionKey, hpSent);
+                    log.info("[{}] Submitted {} HP messages", sessionKey, hpSent);
                 }
             }
 
@@ -88,7 +87,7 @@ public class SessionSender implements Runnable {
                 int npCount = (int)Math.floor(tokens);
                 var page = outboundRepository.findByStatusAndSessionIdAndPriority("QUEUED", sessionKey, "NORMAL", org.springframework.data.domain.PageRequest.of(0, npCount));
                 long npQueued = page.getTotalElements();
-                logger.debug("[{}] NP check: toSend={}, queued={}", sessionKey, npCount, npQueued);
+                log.debug("[{}] NP check: toSend={}, queued={}", sessionKey, npCount, npQueued);
                 
                 int npSent = 0;
                 for (SmsOutboundEntity e : page) {
@@ -98,25 +97,35 @@ public class SessionSender implements Runnable {
                     if (tokens <= 0.0) break;
                 }
                 if (npSent > 0) {
-                    logger.info("[{}] Submitted {} NP messages", sessionKey, npSent);
+                    log.info("[{}] Submitted {} NP messages", sessionKey, npSent);
                 }
             }
         } catch (Exception ex) {
-            logger.error("[{}] Error in sender tick: {}", sessionKey, ex.getMessage(), ex);
+            log.error("[{}] Error in sender tick: {}", sessionKey, ex.getMessage(), ex);
         }
     }
 
     private void submitMessageAsync(SmsOutboundEntity e) {
         submitExecutor.execute(() -> {
             try {
+                // Determine proper TON/NPI for source and destination addresses
+                String sourceAddress = (e.getSourceAddr() != null && !e.getSourceAddr().isEmpty()) 
+                    ? e.getSourceAddr() : "";
+                SmppAddressUtil.AddressInfo sourceInfo = SmppAddressUtil.getSourceAddressInfo(sourceAddress);
+                SmppAddressUtil.AddressInfo destInfo = SmppAddressUtil.getDestinationAddressInfo(e.getMsisdn());
+                
+                log.debug("[{}] Submitting: src={} (TON={}, NPI={}), dest={} (TON={}, NPI={})",
+                    sessionKey, sourceInfo.getAddress(), sourceInfo.getTon(), sourceInfo.getNpi(),
+                    destInfo.getAddress(), destInfo.getTon(), destInfo.getNpi());
+                
                 String messageId = session.submitShortMessage(
                     "CMT",
-                    TypeOfNumber.INTERNATIONAL,
-                    NumberingPlanIndicator.UNKNOWN,
-                    "",
-                    TypeOfNumber.INTERNATIONAL,
-                    NumberingPlanIndicator.UNKNOWN,
-                    e.getMsisdn().replaceAll("\\D", ""),
+                    sourceInfo.getTon(),
+                    sourceInfo.getNpi(),
+                    sourceInfo.getAddress(),
+                    destInfo.getTon(),
+                    destInfo.getNpi(),
+                    destInfo.getAddress(),
                     new ESMClass(),
                     (byte)0,
                     (byte)1,
@@ -134,12 +143,13 @@ public class SessionSender implements Runnable {
                     e.setSmscMsgId(smscId);
                     e.setStatus("SENT");
                     outboundRepository.save(e);
-                    logger.info("[{}] Sent message id={} smsc_msg_id={}", sessionKey, e.getId(), smscId);
+                    log.info("[{}] Sent message id={} smsc_msg_id={} src={} dest={}", 
+                        sessionKey, e.getId(), smscId, sourceInfo.getAddress(), destInfo.getAddress());
                     meterRegistry.counter("smpp.outbound.sent", "priority", e.getPriority(), "session", sessionKey).increment();
                 }
 
             } catch (Exception se) {
-                logger.warn("[{}] submit exception id={} : {}", sessionKey, e.getId(), se.getMessage());
+                log.warn("[{}] submit exception id={} : {}", sessionKey, e.getId(), se.getMessage());
                 try {
                     int nextCount = (e.getRetryCount() == null ? 0 : e.getRetryCount()) + 1;
                     e.setRetryCount(nextCount);
@@ -155,13 +165,13 @@ public class SessionSender implements Runnable {
                     e.setNextRetryAt(java.time.Instant.now().plusMillis(Math.max(0, jittered)));
                     e.setLastAttemptAt(java.time.Instant.now());
                     outboundRepository.save(e);
-                    logger.info("[{}] Marked message id={} for retry (count={}, nextRetryAt={})", sessionKey, e.getId(), e.getRetryCount(), e.getNextRetryAt());
+                    log.info("[{}] Marked message id={} for retry (count={}, nextRetryAt={})", sessionKey, e.getId(), e.getRetryCount(), e.getNextRetryAt());
                     meterRegistry.counter("smpp.outbound.failed", "priority", e.getPriority(), "session", sessionKey).increment();
                 } catch (Exception ex2) {
-                    logger.error("[{}] Error updating retry status for id={}: {}", sessionKey, e.getId(), ex2.getMessage());
+                    log.error("[{}] Error updating retry status for id={}: {}", sessionKey, e.getId(), ex2.getMessage());
                 }
             } catch (Throwable ex) {
-                logger.error("[{}] Unexpected submit error id={}: {}", sessionKey, e.getId(), ex.getMessage());
+                log.error("[{}] Unexpected submit error id={}: {}", sessionKey, e.getId(), ex.getMessage());
             }
         });
     }

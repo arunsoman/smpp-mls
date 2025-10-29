@@ -39,6 +39,9 @@ public class SmsOutboundEntity {
     @Column(name = "msisdn", length = 20)
     private String msisdn;
 
+    @Column(name = "source_addr", length = 20)
+    private String sourceAddr;
+
     @Column(name = "message", columnDefinition = "text")
     private String message;
 
