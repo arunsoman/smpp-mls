@@ -171,7 +171,9 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                 backoff = Math.max(1000, smppProperties.getDefaultConfig().getReconnectDelay()); // Reset backoff
                 
                 // Create and schedule a dedicated SessionSender enforcing HP/NP token buckets
-                SessionSender sender = new SessionSender(sessionKey, session, 
+                String serviceType = (sessionCfg.getServiceType() != null) ? sessionCfg.getServiceType() : "";
+                String sourceAddress = (sessionCfg.getSourceAddress() != null) ? sessionCfg.getSourceAddress() : "";
+                SessionSender sender = new SessionSender(sessionKey, session, serviceType, sourceAddress,
                     Math.max(1, sessionCfg.getTps()), hpMaxPercentage, 
                     outboundRepository, submitExecutor, meterRegistry);
                 

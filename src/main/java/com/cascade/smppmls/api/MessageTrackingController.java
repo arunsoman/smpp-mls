@@ -257,7 +257,7 @@ public class MessageTrackingController {
             case 0x00000001 -> "ESME_RINVMSGLEN - Invalid message length";
             case 0x00000002 -> "ESME_RINVCMDLEN - Invalid command length";
             case 0x00000003 -> "ESME_RINVCMDID - Invalid command ID";
-            case 0x00000004 -> "ESME_RINVBNDSTS - Invalid bind status";
+            case 0x00000004 -> "ESME_RINVBNDSTS - Invalid bind status";            
             case 0x00000005 -> "ESME_RALYBND - Already bound";
             case 0x00000006 -> "ESME_RINVPRTFLG - Invalid priority flag";
             case 0x00000007 -> "ESME_RINVREGDLVFLG - Invalid registered delivery flag";

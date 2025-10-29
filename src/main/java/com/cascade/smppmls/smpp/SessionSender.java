@@ -17,6 +17,8 @@ public class SessionSender implements Runnable {
 
     private final String sessionKey;
     private final SMPPSession session;
+    private final String serviceType;
+    private final String defaultSourceAddress;
     private final int tps;
     private final int hpMaxPerSecond;
     private final SmsOutboundRepository outboundRepository;
@@ -29,12 +31,15 @@ public class SessionSender implements Runnable {
 
     private ScheduledFuture<?> future;
 
-    public SessionSender(String sessionKey, SMPPSession session, int tps, int hpMaxPercentage, 
+    public SessionSender(String sessionKey, SMPPSession session, String serviceType, String defaultSourceAddress,
+                         int tps, int hpMaxPercentage, 
                          SmsOutboundRepository outboundRepository, 
                          java.util.concurrent.ExecutorService submitExecutor, 
                          io.micrometer.core.instrument.MeterRegistry meterRegistry) {
         this.sessionKey = sessionKey;
         this.session = session;
+        this.serviceType = (serviceType != null) ? serviceType : "";
+        this.defaultSourceAddress = (defaultSourceAddress != null) ? defaultSourceAddress : "";
         this.tps = Math.max(1, tps);
         this.hpMaxPerSecond = Math.max(0, (int) Math.ceil(this.tps * (hpMaxPercentage / 100.0)));
         this.outboundRepository = outboundRepository;
@@ -43,7 +48,8 @@ public class SessionSender implements Runnable {
         this.tokens = new AtomicDouble(this.tps); // start full
         this.hpTokens = new AtomicDouble(this.hpMaxPerSecond);
         
-        log.info("[{}] SessionSender initialized: TPS={}, HP_MAX={}", sessionKey, this.tps, this.hpMaxPerSecond);
+        log.info("[{}] SessionSender initialized: TPS={}, HP_MAX={}, serviceType='{}', defaultSourceAddress='{}'", 
+            sessionKey, this.tps, this.hpMaxPerSecond, this.serviceType, this.defaultSourceAddress);
     }
 
     public void setScheduledFuture(ScheduledFuture<?> future) {
@@ -111,8 +117,9 @@ public class SessionSender implements Runnable {
             long startTime = System.currentTimeMillis();
             try {
                 // Determine proper TON/NPI for source and destination addresses
+                // Use message's source address if provided, otherwise use session's default
                 String sourceAddress = (e.getSourceAddr() != null && !e.getSourceAddr().isEmpty()) 
-                    ? e.getSourceAddr() : "";
+                    ? e.getSourceAddr() : defaultSourceAddress;
                 SmppAddressUtil.AddressInfo sourceInfo = SmppAddressUtil.getSourceAddressInfo(sourceAddress);
                 SmppAddressUtil.AddressInfo destInfo = SmppAddressUtil.getDestinationAddressInfo(e.getMsisdn());
                 
@@ -122,7 +129,7 @@ public class SessionSender implements Runnable {
                 
                 // Submit and get response
                 var submitResult = session.submitShortMessage(
-                    "CMT",
+                    serviceType,
                     sourceInfo.getTon(),
                     sourceInfo.getNpi(),
                     sourceInfo.getAddress(),
