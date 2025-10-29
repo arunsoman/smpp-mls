@@ -2,12 +2,13 @@ package com.cascade.smppmls.smpp;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.jsmpp.SMPPConstant;
 import org.jsmpp.bean.*;
 import org.jsmpp.extra.ProcessRequestException;
 import org.jsmpp.session.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.cascade.smppmls.config.SmppProperties;
@@ -24,10 +25,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * jSMPP-based SMPP session manager.
  */
+@Slf4j
 @Component
+@RequiredArgsConstructor
 public class JsmppSessionManager implements SmppSessionManager, MessageReceiverListener {
-
-    private static final Logger logger = LoggerFactory.getLogger(JsmppSessionManager.class);
 
     // Session states (same as SocketSmppSessionManager)
     public enum SessionState {
@@ -45,21 +46,11 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
     private final Map<String, SessionState> sessionStates = new ConcurrentHashMap<>();
     private final Map<String, Boolean> shouldRetry = new ConcurrentHashMap<>();
 
-    @org.springframework.beans.factory.annotation.Value("${priority.high.max-tps-percentage:20}")
+    @Value("${priority.high.max-tps-percentage:20}")
     private int hpMaxPercentage;
 
     private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
     private final com.cascade.smppmls.repository.SmsDlrRepository dlrRepository;
-
-    public JsmppSessionManager(SmppProperties smppProperties, 
-                             SmsOutboundRepository outboundRepository,
-                             com.cascade.smppmls.repository.SmsDlrRepository dlrRepository,
-                             io.micrometer.core.instrument.MeterRegistry meterRegistry) {
-        this.smppProperties = smppProperties;
-        this.outboundRepository = outboundRepository;
-        this.dlrRepository = dlrRepository;
-        this.meterRegistry = meterRegistry;
-    }
 
     @PostConstruct
     public void init() {
@@ -88,14 +79,14 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
     @Override
     public void start() {
         if (smppProperties.getOperators() == null || smppProperties.getOperators().isEmpty()) {
-            logger.warn("No SMPP operators configured for jSMPP manager");
+            log.warn("No SMPP operators configured for jSMPP manager");
             return;
         }
 
         // Log configuration
         int enquireLinkIntervalMs = smppProperties.getDefaultConfig().getEnquireLinkInterval();
         int enquireLinkIntervalSec = enquireLinkIntervalMs / 1000;
-        logger.info("SMPP Configuration: enquire-link-interval={}ms ({}s), reconnect-delay={}ms", 
+        log.info("SMPP Configuration: enquire-link-interval={}ms ({}s), reconnect-delay={}ms", 
             enquireLinkIntervalMs, enquireLinkIntervalSec, smppProperties.getDefaultConfig().getReconnectDelay());
         smppProperties.getOperators().forEach((operatorId, operator) -> {
             AtomicInteger idx = new AtomicInteger();
@@ -117,7 +108,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
         while (shouldRetry.getOrDefault(sessionKey, false)) {
             org.jsmpp.session.SMPPSession session = null;
             try {
-                logger.info("[{}] Attempting bind to {}:{}", sessionKey, host, port);
+                log.info("[{}] Attempting bind to {}:{}", sessionKey, host, port);
                 
                 // Create and configure the session
                 session = new org.jsmpp.session.SMPPSession();
@@ -144,7 +135,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                     )
                 );
                 
-                logger.info("[{}] Bound successfully", sessionKey);
+                log.info("[{}] Bound successfully", sessionKey);
                 sessions.put(sessionKey, session);
                 sessionToKeyMap.put(session.getSessionId(), sessionKey);
                 sessionStates.put(sessionKey, SessionState.CONNECTED);
@@ -173,7 +164,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                 }
                 
             } catch (Exception e) {
-                logger.warn("[{}] Bind/connection error: {} [State: RETRYING]", sessionKey, e.getMessage());
+                log.warn("[{}] Bind/connection error: {} [State: RETRYING]", sessionKey, e.getMessage());
                 sessionStates.put(sessionKey, SessionState.RETRYING);
             } finally {
                 // Cleanup
@@ -181,7 +172,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                     try {
                         session.unbindAndClose();
                     } catch (Exception e) {
-                        logger.warn("[" + sessionKey + "] Error during session cleanup: " + e.getMessage());
+                        log.warn("[" + sessionKey + "] Error during session cleanup: " + e.getMessage());
                     }
                     sessions.remove(sessionKey);
                     if (session.getSessionId() != null) {
@@ -196,19 +187,19 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                     SessionSender sender = sessionSenders.remove(sessionKey);
                     if (sender != null) sender.cancel();
                 } catch (Exception e) {
-                    logger.warn("[" + sessionKey + "] Error cleaning up sender: " + e.getMessage());
+                    log.warn("[" + sessionKey + "] Error cleaning up sender: " + e.getMessage());
                 }
             }
             
             // Only retry if shouldRetry is true
             if (!shouldRetry.getOrDefault(sessionKey, false)) {
-                logger.info("[{}] Not retrying (manually stopped)", sessionKey);
+                log.info("[{}] Not retrying (manually stopped)", sessionKey);
                 break;
             }
             
             // Exponential backoff before next bind attempt
             try {
-                logger.info("[{}] Reconnect sleeping for {} ms", sessionKey, backoff);
+                log.info("[{}] Reconnect sleeping for {} ms", sessionKey, backoff);
                 Thread.sleep(backoff);
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
@@ -218,7 +209,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
         }
         
         sessionStates.put(sessionKey, SessionState.STOPPED);
-        logger.info("[{}] Bind loop exiting [Final State: STOPPED]", sessionKey);
+        log.info("[{}] Bind loop exiting [Final State: STOPPED]", sessionKey);
     }
 
     // Implement MessageReceiverListener interface methods
@@ -229,14 +220,14 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
         String sessionKey = findSessionKeyForDeliverSm(deliverSm);
         
         if (sessionKey == null) {
-            logger.warn("Received DeliverSm for unknown session");
+            log.warn("Received DeliverSm for unknown session");
             throw new ProcessRequestException("Unknown session", SMPPConstant.STAT_ESME_RINVSYSID);
         }
 
         try {
             byte[] shortMessage = deliverSm.getShortMessage();
             String text = shortMessage != null ? new String(shortMessage, StandardCharsets.UTF_8) : "";
-            logger.info("[" + sessionKey + "] Received DeliverSm (short_message={}): {}", 
+            log.info("[" + sessionKey + "] Received DeliverSm (short_message={}): {}", 
                 shortMessage != null ? shortMessage.length : 0, text);
 
             String smscId = null;
@@ -249,7 +240,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                 // Skip the first 4 bytes (tag + length)
                 if (value != null && value.length > 4) {
                     smscId = new String(value, 4, value.length - 4, StandardCharsets.UTF_8).trim();
-                    logger.debug("[" + sessionKey + "] Extracted receipted_message_id TLV: {}", smscId);
+                    log.debug("[" + sessionKey + "] Extracted receipted_message_id TLV: {}", smscId);
                 }
             }
 
@@ -261,7 +252,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                 // Skip the first 4 bytes (tag + length)
                 if (value != null && value.length > 4) {
                     numericState = (int) value[4] & 0xFF;
-                    logger.debug("[" + sessionKey + "] Extracted message_state TLV: {}", numericState);
+                    log.debug("[" + sessionKey + "] Extracted message_state TLV: {}", numericState);
                 }
             }
 
@@ -298,11 +289,11 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
             if (smscId != null && !smscId.isBlank()) {
                 processDeliveryReceipt(sessionKey, smscId, rawStatus);
             } else {
-                logger.warn("[" + sessionKey + "] DeliverSm without parsable id: {}", text);
+                log.warn("[" + sessionKey + "] DeliverSm without parsable id: {}", text);
             }
 
         } catch (Exception e) {
-            logger.error("[" + sessionKey + "] Error processing DeliverSm: " + e.getMessage(), e);
+            log.error("[" + sessionKey + "] Error processing DeliverSm: " + e.getMessage(), e);
             throw new ProcessRequestException(e.getMessage(), SMPPConstant.STAT_ESME_RX_R_APPN);
         }
     }
@@ -321,10 +312,10 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
             dlrEntity.setReceivedAt(java.time.Instant.now());
             dlrRepository.save(dlrEntity);
             
-            logger.info("[" + sessionKey + "] Mapped DLR for outbound id={} smsc_msg_id={} mapped={}", 
+            log.info("[" + sessionKey + "] Mapped DLR for outbound id={} smsc_msg_id={} mapped={}", 
                 outbound.getId(), smscId, mappedStatus);
         } else {
-            logger.warn("[" + sessionKey + "] Could not find outbound for smsc_msg_id={}", smscId);
+            log.warn("[" + sessionKey + "] Could not find outbound for smsc_msg_id={}", smscId);
         }
     }
 
@@ -355,34 +346,34 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
     
     @Override
     public void onAcceptAlertNotification(AlertNotification alertNotification) {
-        logger.debug("Alert notification received: " + alertNotification);
+        log.debug("Alert notification received: " + alertNotification);
     }
     
     @Override
     public void stop() {
-        logger.info("Shutting down SMPP session manager...");
+        log.info("Shutting down SMPP session manager...");
         
         // Stop all SessionSender schedulers first
         sessionSenders.forEach((sessionKey, sender) -> {
             try {
-                logger.info("[{}] Stopping SessionSender...", sessionKey);
+                log.info("[{}] Stopping SessionSender...", sessionKey);
                 sender.cancel();
             } catch (Exception e) {
-                logger.error("[{}] Error stopping SessionSender: {}", sessionKey, e.getMessage());
+                log.error("[{}] Error stopping SessionSender: {}", sessionKey, e.getMessage());
             }
         });
         
         // Shutdown the sender scheduler
         if (senderScheduler != null && !senderScheduler.isShutdown()) {
-            logger.info("Shutting down sender scheduler...");
+            log.info("Shutting down sender scheduler...");
             senderScheduler.shutdown();
             try {
                 if (!senderScheduler.awaitTermination(10, TimeUnit.SECONDS)) {
-                    logger.warn("Sender scheduler did not terminate in time, forcing shutdown");
+                    log.warn("Sender scheduler did not terminate in time, forcing shutdown");
                     senderScheduler.shutdownNow();
                 }
             } catch (InterruptedException e) {
-                logger.warn("Interrupted while waiting for sender scheduler shutdown");
+                log.warn("Interrupted while waiting for sender scheduler shutdown");
                 senderScheduler.shutdownNow();
                 Thread.currentThread().interrupt();
             }
@@ -390,15 +381,15 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
         
         // Shutdown the submit executor
         if (submitExecutor != null && !submitExecutor.isShutdown()) {
-            logger.info("Shutting down submit executor...");
+            log.info("Shutting down submit executor...");
             submitExecutor.shutdown();
             try {
                 if (!submitExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
-                    logger.warn("Submit executor did not terminate in time, forcing shutdown");
+                    log.warn("Submit executor did not terminate in time, forcing shutdown");
                     submitExecutor.shutdownNow();
                 }
             } catch (InterruptedException e) {
-                logger.warn("Interrupted while waiting for submit executor shutdown");
+                log.warn("Interrupted while waiting for submit executor shutdown");
                 submitExecutor.shutdownNow();
                 Thread.currentThread().interrupt();
             }
@@ -409,19 +400,19 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
             if (session != null) {
                 try {
                     if (session.getSessionState().isBound()) {
-                        logger.info("[{}] Sending unbind request...", sessionKey);
+                        log.info("[{}] Sending unbind request...", sessionKey);
                         session.unbindAndClose();
-                        logger.info("[{}] Session unbound and closed", sessionKey);
+                        log.info("[{}] Session unbound and closed", sessionKey);
                     } else {
-                        logger.info("[{}] Session not bound, closing...", sessionKey);
+                        log.info("[{}] Session not bound, closing...", sessionKey);
                         session.close();
                     }
                 } catch (Exception e) {
-                    logger.error("[{}] Error during unbind/close: {}", sessionKey, e.getMessage());
+                    log.error("[{}] Error during unbind/close: {}", sessionKey, e.getMessage());
                     try {
                         session.close();
                     } catch (Exception ex) {
-                        logger.error("[{}] Error forcing close: {}", sessionKey, ex.getMessage());
+                        log.error("[{}] Error forcing close: {}", sessionKey, ex.getMessage());
                     }
                 }
             }
@@ -431,12 +422,12 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
         sessionSenders.clear();
         senderFutures.clear();
         
-        logger.info("SMPP session manager shutdown complete");
+        log.info("SMPP session manager shutdown complete");
     }
     
     @Override
     public void stopSession(String sessionId) {
-        logger.info("Stopping session: {}", sessionId);
+        log.info("Stopping session: {}", sessionId);
         
         sessionStates.put(sessionId, SessionState.STOPPING);
         shouldRetry.put(sessionId, false); // Prevent retries
@@ -445,7 +436,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
         ScheduledFuture<?> future = senderFutures.remove(sessionId);
         if (future != null) {
             future.cancel(false);
-            logger.info("[{}] Sender task cancelled", sessionId);
+            log.info("[{}] Sender task cancelled", sessionId);
         }
         
         // Remove sender
@@ -460,23 +451,23 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
             try {
                 if (session.getSessionState().isBound()) {
                     session.unbindAndClose();
-                    logger.info("[{}] Session unbound and closed", sessionId);
+                    log.info("[{}] Session unbound and closed", sessionId);
                 } else {
                     session.close();
-                    logger.info("[{}] Session closed", sessionId);
+                    log.info("[{}] Session closed", sessionId);
                 }
             } catch (Exception e) {
-                logger.error("[{}] Error stopping session: {}", sessionId, e.getMessage());
+                log.error("[{}] Error stopping session: {}", sessionId, e.getMessage());
             }
         }
         
         sessionStates.put(sessionId, SessionState.STOPPED);
-        logger.info("[{}] Session stopped successfully", sessionId);
+        log.info("[{}] Session stopped successfully", sessionId);
     }
     
     @Override
     public void startSession(String sessionId) {
-        logger.info("Starting session: {}", sessionId);
+        log.info("Starting session: {}", sessionId);
         
         // Parse sessionId to get operator and systemId
         String[] parts = sessionId.split(":");
@@ -507,7 +498,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
             bindLoop(sessionId, operatorId, sessionCfg, operator.getHost(), operator.getPort())
         );
         
-        logger.info("[{}] Session start initiated", sessionId);
+        log.info("[{}] Session start initiated", sessionId);
     }
     
     /**

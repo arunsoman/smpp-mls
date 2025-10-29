@@ -14,16 +14,16 @@ import java.util.concurrent.TimeUnit;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import com.cascade.smppmls.config.SmppProperties;
 
+@Slf4j
 @Component
+@RequiredArgsConstructor
 public class SocketSmppSessionManager implements SmppSessionManager {
-
-    private static final Logger logger = LoggerFactory.getLogger(SocketSmppSessionManager.class);
 
     private final SmppProperties smppProperties;
 
@@ -50,10 +50,6 @@ public class SocketSmppSessionManager implements SmppSessionManager {
 
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
 
-    public SocketSmppSessionManager(SmppProperties smppProperties) {
-        this.smppProperties = smppProperties;
-    }
-
     @PostConstruct
     public void init() {
         start();
@@ -79,13 +75,13 @@ public class SocketSmppSessionManager implements SmppSessionManager {
     @Override
     public void start() {
         if (smppProperties.getOperators() == null || smppProperties.getOperators().isEmpty()) {
-            logger.warn("No SMPP operators configured. Session manager will not start any binds.");
+            log.warn("No SMPP operators configured. Session manager will not start any binds.");
             return;
         }
 
         smppProperties.getOperators().forEach((operatorId, operator) -> {
             if (operator.getSessions() == null || operator.getSessions().isEmpty()) {
-                logger.warn("Operator {} has no sessions configured", operatorId);
+                log.warn("Operator {} has no sessions configured", operatorId);
                 return;
             }
 
@@ -110,13 +106,13 @@ public class SocketSmppSessionManager implements SmppSessionManager {
         
         while (!Thread.currentThread().isInterrupted() && shouldRetry.getOrDefault(sessionKey, false)) {
             try (Socket socket = new Socket()) {
-                logger.info("[{}] Attempting TCP connect to {}:{} (systemId={}) [State: {}]", 
+                log.info("[{}] Attempting TCP connect to {}:{} (systemId={}) [State: {}]", 
                     sessionKey, host, port, session.getSystemId(), sessionStates.get(sessionKey));
                 
                 socket.connect(new InetSocketAddress(host, port), 5_000);
                 
                 // Connection successful
-                logger.info("[{}] TCP connect successful - marking session healthy", sessionKey);
+                log.info("[{}] TCP connect successful - marking session healthy", sessionKey);
                 sessionHealth.put(sessionKey, true);
                 sessionStates.put(sessionKey, SessionState.CONNECTED);
                 backoff = Math.max(1000, smppProperties.getDefaultConfig().getReconnectDelay()); // Reset backoff
@@ -132,12 +128,12 @@ public class SocketSmppSessionManager implements SmppSessionManager {
                     
                     // simple TCP connectivity check
                     if (socket.isClosed() || !socket.isConnected()) {
-                        logger.warn("[{}] Socket no longer connected; will reconnect", sessionKey);
+                        log.warn("[{}] Socket no longer connected; will reconnect", sessionKey);
                         sessionHealth.put(sessionKey, false);
                         sessionStates.put(sessionKey, SessionState.RETRYING);
                         break;
                     }
-                    logger.debug("[{}] session healthy (keepalive)", sessionKey);
+                    log.debug("[{}] session healthy (keepalive)", sessionKey);
                 }
 
             } catch (IOException e) {
@@ -146,11 +142,11 @@ public class SocketSmppSessionManager implements SmppSessionManager {
                 
                 // Only retry if shouldRetry is true
                 if (!shouldRetry.getOrDefault(sessionKey, false)) {
-                    logger.info("[{}] Not retrying connection (manually stopped)", sessionKey);
+                    log.info("[{}] Not retrying connection (manually stopped)", sessionKey);
                     break;
                 }
                 
-                logger.warn("[{}] Connect failed to {}:{} - will retry in {} ms. Reason: {}", 
+                log.warn("[{}] Connect failed to {}:{} - will retry in {} ms. Reason: {}", 
                     sessionKey, host, port, backoff, e.getMessage());
                 
                 try {
@@ -166,16 +162,16 @@ public class SocketSmppSessionManager implements SmppSessionManager {
         // Clean exit
         sessionHealth.put(sessionKey, false);
         sessionStates.put(sessionKey, SessionState.STOPPED);
-        logger.info("[{}] Connect loop ending [Final State: STOPPED]", sessionKey);
+        log.info("[{}] Connect loop ending [Final State: STOPPED]", sessionKey);
     }
 
     @Override
     public void stop() {
         try {
-            logger.info("Shutting down SMPP session manager scheduler");
+            log.info("Shutting down SMPP session manager scheduler");
             scheduler.shutdownNow();
             if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
-                logger.warn("Scheduler did not terminate promptly");
+                log.warn("Scheduler did not terminate promptly");
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -184,7 +180,7 @@ public class SocketSmppSessionManager implements SmppSessionManager {
     
     @Override
     public void stopSession(String sessionId) {
-        logger.info("Stopping session: {}", sessionId);
+        log.info("Stopping session: {}", sessionId);
         
         sessionStates.put(sessionId, SessionState.STOPPING);
         shouldRetry.put(sessionId, false); // Prevent retries
@@ -192,7 +188,7 @@ public class SocketSmppSessionManager implements SmppSessionManager {
         Thread thread = sessionThreads.get(sessionId);
         if (thread != null && thread.isAlive()) {
             thread.interrupt();
-            logger.info("[{}] Session thread interrupted", sessionId);
+            log.info("[{}] Session thread interrupted", sessionId);
             
             // Wait a bit for graceful shutdown
             try {
@@ -205,17 +201,17 @@ public class SocketSmppSessionManager implements SmppSessionManager {
         sessionThreads.remove(sessionId);
         sessionHealth.put(sessionId, false);
         sessionStates.put(sessionId, SessionState.STOPPED);
-        logger.info("[{}] Session stopped successfully", sessionId);
+        log.info("[{}] Session stopped successfully", sessionId);
     }
     
     @Override
     public void startSession(String sessionId) {
-        logger.info("Starting session: {}", sessionId);
+        log.info("Starting session: {}", sessionId);
         
         // Check if already running
         Thread existingThread = sessionThreads.get(sessionId);
         if (existingThread != null && existingThread.isAlive()) {
-            logger.warn("[{}] Session already running, ignoring start request", sessionId);
+            log.warn("[{}] Session already running, ignoring start request", sessionId);
             return;
         }
         
@@ -249,7 +245,7 @@ public class SocketSmppSessionManager implements SmppSessionManager {
         sessionThreads.put(sessionId, thread);
         thread.start();
         
-        logger.info("[{}] Session started", sessionId);
+        log.info("[{}] Session started", sessionId);
     }
     
     /**
