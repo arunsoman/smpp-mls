@@ -131,7 +131,7 @@ public class SessionSender implements Runnable {
                     (byte)1,
                     null,
                     null,
-                    new RegisteredDelivery(SMSCDeliveryReceipt.DEFAULT),
+                    new RegisteredDelivery(SMSCDeliveryReceipt.SUCCESS_FAILURE),
                     (byte)0,
                     new GeneralDataCoding(Alphabet.ALPHA_DEFAULT, MessageClass.CLASS1, false),
                     (byte)0,
