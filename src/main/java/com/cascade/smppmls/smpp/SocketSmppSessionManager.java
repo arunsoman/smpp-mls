@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -49,6 +50,7 @@ public class SocketSmppSessionManager implements SmppSessionManager {
     private final Map<String, Boolean> shouldRetry = Collections.synchronizedMap(new HashMap<>());
 
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
+    private final ExecutorService virtualThreadExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     @PostConstruct
     public void init() {
@@ -85,18 +87,36 @@ public class SocketSmppSessionManager implements SmppSessionManager {
                 return;
             }
 
-            int idx = 0;
+            // Check if multiple sessions require uuId
+            if (operator.getSessions().size() > 1) {
+                for (SmppProperties.Session s : operator.getSessions()) {
+                    if (s.getUuId() == null || s.getUuId().trim().isEmpty()) {
+                        throw new IllegalStateException(
+                            String.format("Operator '%s' has multiple sessions but session with systemId '%s' is missing uuId. " +
+                                "uuId is required when multiple sessions are configured.", 
+                                operatorId, s.getSystemId()));
+                    }
+                }
+            }
+
             for (SmppProperties.Session s : operator.getSessions()) {
-                final String sessionKey = operatorId + ":" + (s.getSystemId() != null ? s.getSystemId() + "-"+ ++idx : "session-" + ++idx);
+                // Use uuId if available, otherwise use operatorId:systemId for single session
+                final String sessionKey;
+                if (s.getUuId() != null && !s.getUuId().trim().isEmpty()) {
+                    sessionKey = s.getUuId();
+                } else {
+                    sessionKey = operatorId + ":" + s.getSystemId();
+                }
+                
                 sessionHealth.put(sessionKey, false);
                 sessionStates.put(sessionKey, SessionState.STARTING);
                 shouldRetry.put(sessionKey, true); // Auto-start sessions should retry
                 
-                // schedule a connect attempt with initial delay 0
-                Thread thread = new Thread(() -> connectLoop(operatorId, operator.getHost(), operator.getPort(), s, sessionKey));
-                thread.setName("SMPP-" + sessionKey);
+                // schedule a connect attempt with initial delay 0 using virtual thread
+                Thread thread = Thread.ofVirtual()
+                    .name("SMPP-" + sessionKey)
+                    .start(() -> connectLoop(operatorId, operator.getHost(), operator.getPort(), s, sessionKey));
                 sessionThreads.put(sessionKey, thread);
-                thread.start();
             }
         });
     }
@@ -104,15 +124,20 @@ public class SocketSmppSessionManager implements SmppSessionManager {
     private void connectLoop(String operatorId, String host, int port, SmppProperties.Session session, String sessionKey) {
         int backoff = Math.max(1000, smppProperties.getDefaultConfig().getReconnectDelay());
         
+        // Build a descriptive session identifier for logging
+        String sessionDesc = session.getUuId() != null && !session.getUuId().trim().isEmpty() 
+            ? String.format("%s (systemId=%s, operator=%s)", session.getUuId(), session.getSystemId(), operatorId)
+            : String.format("%s (uuid:)", sessionKey);
+        
         while (!Thread.currentThread().isInterrupted() && shouldRetry.getOrDefault(sessionKey, false)) {
             try (Socket socket = new Socket()) {
-                log.info("[{}] Attempting TCP connect to {}:{} (systemId={}) [State: {}]", 
-                    sessionKey, host, port, session.getSystemId(), sessionStates.get(sessionKey));
+                log.info("[{}] Attempting TCP connect to {}:{} [State: {}]", 
+                    sessionDesc, host, port, sessionStates.get(sessionKey));
                 
                 socket.connect(new InetSocketAddress(host, port), 5_000);
                 
                 // Connection successful
-                log.info("[{}] TCP connect successful - marking session healthy", sessionKey);
+                log.info("[{}] TCP connect successful - marking session healthy", sessionDesc);
                 sessionHealth.put(sessionKey, true);
                 sessionStates.put(sessionKey, SessionState.CONNECTED);
                 backoff = Math.max(1000, smppProperties.getDefaultConfig().getReconnectDelay()); // Reset backoff
@@ -128,12 +153,12 @@ public class SocketSmppSessionManager implements SmppSessionManager {
                     
                     // simple TCP connectivity check
                     if (socket.isClosed() || !socket.isConnected()) {
-                        log.warn("[{}] Socket no longer connected; will reconnect", sessionKey);
+                        log.warn("[{}] Socket no longer connected; will reconnect", sessionDesc);
                         sessionHealth.put(sessionKey, false);
                         sessionStates.put(sessionKey, SessionState.RETRYING);
                         break;
                     }
-                    log.debug("[{}] session healthy (keepalive)", sessionKey);
+                    log.debug("[{}] session healthy (keepalive)", sessionDesc);
                 }
 
             } catch (IOException e) {
@@ -142,12 +167,12 @@ public class SocketSmppSessionManager implements SmppSessionManager {
                 
                 // Only retry if shouldRetry is true
                 if (!shouldRetry.getOrDefault(sessionKey, false)) {
-                    log.info("[{}] Not retrying connection (manually stopped)", sessionKey);
+                    log.info("[{}] Not retrying connection (manually stopped)", sessionDesc);
                     break;
                 }
                 
                 log.warn("[{}] Connect failed to {}:{} - will retry in {} ms. Reason: {}", 
-                    sessionKey, host, port, backoff, e.getMessage());
+                    sessionDesc, host, port, backoff, e.getMessage());
                 
                 try {
                     Thread.sleep(backoff);
@@ -162,13 +187,24 @@ public class SocketSmppSessionManager implements SmppSessionManager {
         // Clean exit
         sessionHealth.put(sessionKey, false);
         sessionStates.put(sessionKey, SessionState.STOPPED);
-        log.info("[{}] Connect loop ending [Final State: STOPPED]", sessionKey);
+        log.info("[{}] Connect loop ending [Final State: STOPPED]", sessionDesc);
     }
 
     @Override
     public void stop() {
         try {
-            log.info("Shutting down SMPP session manager scheduler");
+            log.info("Shutting down SMPP session manager");
+            
+            // Shutdown virtual thread executor
+            if (virtualThreadExecutor != null && !virtualThreadExecutor.isShutdown()) {
+                virtualThreadExecutor.shutdown();
+                if (!virtualThreadExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    log.warn("Virtual thread executor did not terminate promptly");
+                    virtualThreadExecutor.shutdownNow();
+                }
+            }
+            
+            // Shutdown scheduler
             scheduler.shutdownNow();
             if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
                 log.warn("Scheduler did not terminate promptly");
@@ -235,15 +271,21 @@ public class SocketSmppSessionManager implements SmppSessionManager {
             .findFirst()
             .orElseThrow(() -> new IllegalArgumentException("Session not found: " + systemId));
         
-        // Start a new thread for this session
+        // Start a new virtual thread for this session
         sessionHealth.put(sessionId, false);
         sessionStates.put(sessionId, SessionState.STARTING);
         shouldRetry.put(sessionId, true); // Enable retries
         
-        Thread thread = new Thread(() -> connectLoop(operatorId, operator.getHost(), operator.getPort(), sessionCfg, sessionId));
-        thread.setName("SMPP-" + sessionId);
+        // Make variables effectively final for lambda
+        final String finalOperatorId = operatorId;
+        final String finalHost = operator.getHost();
+        final int finalPort = operator.getPort();
+        final SmppProperties.Session finalSessionCfg = sessionCfg;
+        
+        Thread thread = Thread.ofVirtual()
+            .name("SMPP-" + sessionId)
+            .start(() -> connectLoop(finalOperatorId, finalHost, finalPort, finalSessionCfg, sessionId));
         sessionThreads.put(sessionId, thread);
-        thread.start();
         
         log.info("[{}] Session started", sessionId);
     }

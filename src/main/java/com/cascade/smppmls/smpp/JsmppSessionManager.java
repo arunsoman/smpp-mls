@@ -40,6 +40,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
     private final Map<String, org.jsmpp.session.SMPPSession> sessions = new ConcurrentHashMap<>();
     private final ScheduledExecutorService senderScheduler = Executors.newScheduledThreadPool(8);
     private final ExecutorService submitExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private final ExecutorService bindLoopExecutor = Executors.newVirtualThreadPerTaskExecutor();
     private final Map<String, SessionSender> sessionSenders = new ConcurrentHashMap<>();
     private final Map<String, ScheduledFuture<?>> senderFutures = new ConcurrentHashMap<>();
     private final Map<String, String> sessionToKeyMap = new ConcurrentHashMap<>();
@@ -88,15 +89,38 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
         int enquireLinkIntervalSec = enquireLinkIntervalMs / 1000;
         log.info("SMPP Configuration: enquire-link-interval={}ms ({}s), reconnect-delay={}ms", 
             enquireLinkIntervalMs, enquireLinkIntervalSec, smppProperties.getDefaultConfig().getReconnectDelay());
+        
         smppProperties.getOperators().forEach((operatorId, operator) -> {
-            AtomicInteger idx = new AtomicInteger();
-            if (operator.getSessions() == null) return;
+            if (operator.getSessions() == null || operator.getSessions().isEmpty()) {
+                log.warn("Operator {} has no sessions configured", operatorId);
+                return;
+            }
+            
+            // Check if multiple sessions require uuId
+            if (operator.getSessions().size() > 1) {
+                for (SmppProperties.Session s : operator.getSessions()) {
+                    if (s.getUuId() == null || s.getUuId().trim().isEmpty()) {
+                        throw new IllegalStateException(
+                            String.format("Operator '%s' has multiple sessions but session with systemId '%s' is missing uuId. " +
+                                "uuId is required when multiple sessions are configured.", 
+                                operatorId, s.getSystemId()));
+                    }
+                }
+            }
+            
             operator.getSessions().forEach(sessionCfg -> {
-                String sessionKey = operatorId + ":" + sessionCfg.getSystemId() + "-" + idx.incrementAndGet();
+                // Use uuId if available, otherwise use operatorId:systemId for single session
+                String sessionKey;
+                if (sessionCfg.getUuId() != null && !sessionCfg.getUuId().trim().isEmpty()) {
+                    sessionKey = sessionCfg.getUuId();
+                } else {
+                    sessionKey = operatorId + ":" + sessionCfg.getSystemId();
+                }
+                
                 sessionStates.put(sessionKey, SessionState.STARTING);
                 shouldRetry.put(sessionKey, true); // Auto-start sessions should retry
-                // Start a dedicated bind loop for this session to handle reconnect/backoff
-                Executors.newSingleThreadExecutor().execute(() -> bindLoop(sessionKey, operatorId, sessionCfg, operator.getHost(), operator.getPort()));
+                // Start a dedicated bind loop for this session to handle reconnect/backoff using virtual thread
+                bindLoopExecutor.execute(() -> bindLoop(sessionKey, operatorId, sessionCfg, operator.getHost(), operator.getPort()));
             });
         });
     }
@@ -105,10 +129,15 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
         long backoff = Math.max(1000, smppProperties.getDefaultConfig().getReconnectDelay());
         final long maxBackoff = 60_000;
         
+        // Build a descriptive session identifier for logging
+        String sessionDesc = sessionCfg.getUuId() != null && !sessionCfg.getUuId().trim().isEmpty() 
+            ? String.format("%s (systemId=%s, operator=%s)", sessionCfg.getUuId(), sessionCfg.getSystemId(), operatorId)
+            : String.format("%s (uuid:)", sessionKey);
+        
         while (shouldRetry.getOrDefault(sessionKey, false)) {
             org.jsmpp.session.SMPPSession session = null;
             try {
-                log.info("[{}] Attempting bind to {}:{}", sessionKey, host, port);
+                log.info("[{}] Attempting bind to {}:{}", sessionDesc, host, port);
                 
                 // Create and configure the session
                 session = new org.jsmpp.session.SMPPSession();
@@ -135,7 +164,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                     )
                 );
                 
-                log.info("[{}] Bound successfully", sessionKey);
+                log.info("[{}] Bound successfully", sessionDesc);
                 sessions.put(sessionKey, session);
                 sessionToKeyMap.put(session.getSessionId(), sessionKey);
                 sessionStates.put(sessionKey, SessionState.CONNECTED);
@@ -164,7 +193,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                 }
                 
             } catch (Exception e) {
-                log.warn("[{}] Bind/connection error: {} [State: RETRYING]", sessionKey, e.getMessage());
+                log.warn("[{}] Bind/connection error: {} [State: RETRYING]", sessionDesc, e.getMessage());
                 sessionStates.put(sessionKey, SessionState.RETRYING);
             } finally {
                 // Cleanup
@@ -172,7 +201,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                     try {
                         session.unbindAndClose();
                     } catch (Exception e) {
-                        log.warn("[" + sessionKey + "] Error during session cleanup: " + e.getMessage());
+                        log.warn("[{}] Error during session cleanup: {}", sessionDesc, e.getMessage());
                     }
                     sessions.remove(sessionKey);
                     if (session.getSessionId() != null) {
@@ -187,19 +216,19 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                     SessionSender sender = sessionSenders.remove(sessionKey);
                     if (sender != null) sender.cancel();
                 } catch (Exception e) {
-                    log.warn("[" + sessionKey + "] Error cleaning up sender: " + e.getMessage());
+                    log.warn("[{}] Error cleaning up sender: {}", sessionDesc, e.getMessage());
                 }
             }
             
             // Only retry if shouldRetry is true
             if (!shouldRetry.getOrDefault(sessionKey, false)) {
-                log.info("[{}] Not retrying (manually stopped)", sessionKey);
+                log.info("[{}] Not retrying (manually stopped)", sessionDesc);
                 break;
             }
             
             // Exponential backoff before next bind attempt
             try {
-                log.info("[{}] Reconnect sleeping for {} ms", sessionKey, backoff);
+                log.info("[{}] Reconnect sleeping for {} ms", sessionDesc, backoff);
                 Thread.sleep(backoff);
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
@@ -209,7 +238,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
         }
         
         sessionStates.put(sessionKey, SessionState.STOPPED);
-        log.info("[{}] Bind loop exiting [Final State: STOPPED]", sessionKey);
+        log.info("[{}] Bind loop exiting [Final State: STOPPED]", sessionDesc);
     }
 
     // Implement MessageReceiverListener interface methods
@@ -363,6 +392,22 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
             }
         });
         
+        // Shutdown the bind loop executor (virtual threads)
+        if (bindLoopExecutor != null && !bindLoopExecutor.isShutdown()) {
+            log.info("Shutting down bind loop executor (virtual threads)...");
+            bindLoopExecutor.shutdown();
+            try {
+                if (!bindLoopExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
+                    log.warn("Bind loop executor did not terminate in time, forcing shutdown");
+                    bindLoopExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                log.warn("Interrupted while waiting for bind loop executor shutdown");
+                bindLoopExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+        
         // Shutdown the sender scheduler
         if (senderScheduler != null && !senderScheduler.isShutdown()) {
             log.info("Shutting down sender scheduler...");
@@ -379,9 +424,9 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
             }
         }
         
-        // Shutdown the submit executor
+        // Shutdown the submit executor (virtual threads)
         if (submitExecutor != null && !submitExecutor.isShutdown()) {
-            log.info("Shutting down submit executor...");
+            log.info("Shutting down submit executor (virtual threads)...");
             submitExecutor.shutdown();
             try {
                 if (!submitExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
@@ -488,14 +533,17 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
             .filter(s -> s.getSystemId().equals(systemId))
             .findFirst()
             .orElseThrow(() -> new IllegalArgumentException("Session not found: " + systemId));
-        
         // Enable retries and set state
         sessionStates.put(sessionId, SessionState.STARTING);
         shouldRetry.put(sessionId, true);
         
-        // Start the bind loop for this session
-        Executors.newSingleThreadExecutor().execute(() -> 
-            bindLoop(sessionId, operatorId, sessionCfg, operator.getHost(), operator.getPort())
+        // Start the bind loop for this session using virtual thread
+        final String finalOperatorId = operatorId;
+        final SmppProperties.Session finalSessionCfg = sessionCfg;
+        final String finalHost = operator.getHost();
+        final int finalPort = operator.getPort();
+        bindLoopExecutor.execute(() -> 
+            bindLoop(sessionId, finalOperatorId, finalSessionCfg, finalHost, finalPort)
         );
         
         log.info("[{}] Session start initiated", sessionId);
