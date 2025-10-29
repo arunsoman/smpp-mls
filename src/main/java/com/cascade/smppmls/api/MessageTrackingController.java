@@ -162,7 +162,25 @@ public class MessageTrackingController {
         // SMPP Submission Details
         Map<String, Object> submission = new LinkedHashMap<>();
         submission.put("smscMessageId", msg.getSmscMsgId());
-        submission.put("submittedAt", msg.getCreatedAt());
+        submission.put("submittedAt", msg.getSentAt());
+        
+        // Submit_SM Response Tracking
+        if (msg.getSubmitResponseTimeMs() != null) {
+            submission.put("responseTimeMs", msg.getSubmitResponseTimeMs());
+        }
+        
+        if (msg.getSubmitSmStatus() != null) {
+            submission.put("submitSmStatus", msg.getSubmitSmStatus());
+            submission.put("submitSmStatusHex", String.format("0x%08X", msg.getSubmitSmStatus()));
+            
+            // Add human-readable status
+            String statusDescription = getSubmitSmStatusDescription(msg.getSubmitSmStatus());
+            submission.put("submitSmStatusDescription", statusDescription);
+        }
+        
+        if (msg.getSubmitSmError() != null) {
+            submission.put("submitSmError", msg.getSubmitSmError());
+        }
         
         // Calculate submission delay
         if (msg.getCreatedAt() != null && msg.getUpdatedAt() != null && "SENT".equals(msg.getStatus())) {
@@ -228,5 +246,63 @@ public class MessageTrackingController {
         report.put("timeline", timeline);
         
         return report;
+    }
+    
+    /**
+     * Get human-readable description for SMPP submit_sm status codes
+     */
+    private String getSubmitSmStatusDescription(int status) {
+        return switch (status) {
+            case 0x00000000 -> "ESME_ROK - Success";
+            case 0x00000001 -> "ESME_RINVMSGLEN - Invalid message length";
+            case 0x00000002 -> "ESME_RINVCMDLEN - Invalid command length";
+            case 0x00000003 -> "ESME_RINVCMDID - Invalid command ID";
+            case 0x00000004 -> "ESME_RINVBNDSTS - Invalid bind status";
+            case 0x00000005 -> "ESME_RALYBND - Already bound";
+            case 0x00000006 -> "ESME_RINVPRTFLG - Invalid priority flag";
+            case 0x00000007 -> "ESME_RINVREGDLVFLG - Invalid registered delivery flag";
+            case 0x00000008 -> "ESME_RSYSERR - System error";
+            case 0x0000000A -> "ESME_RINVDSTADR - Invalid destination address";
+            case 0x0000000B -> "ESME_RINVDSTADDRTON - Invalid destination address TON";
+            case 0x0000000C -> "ESME_RINVDSTADDRNPI - Invalid destination address NPI";
+            case 0x0000000E -> "ESME_RINVSRCADR - Invalid source address";
+            case 0x0000000F -> "ESME_RINVSRCADDRTON - Invalid source address TON";
+            case 0x00000010 -> "ESME_RINVSRCADDRNPI - Invalid source address NPI";
+            case 0x00000011 -> "ESME_RINVDSTTON - Invalid destination TON";
+            case 0x00000013 -> "ESME_RINVDSTADDRSUBUNIT - Invalid destination address subunit";
+            case 0x00000014 -> "ESME_RMSGQFUL - Message queue full";
+            case 0x00000015 -> "ESME_RINVSERTYP - Invalid service type";
+            case 0x00000033 -> "ESME_RINVDLNAME - Invalid distribution list name";
+            case 0x00000034 -> "ESME_RINVDESTFLAG - Invalid destination flag";
+            case 0x00000040 -> "ESME_RINVSUBREP - Invalid submit with replace";
+            case 0x00000042 -> "ESME_RINVESMCLASS - Invalid ESM class";
+            case 0x00000043 -> "ESME_RCNTSUBDL - Cannot submit to distribution list";
+            case 0x00000044 -> "ESME_RSUBMITFAIL - Submit failed";
+            case 0x00000045 -> "ESME_RINVNUMDESTS - Invalid number of destinations";
+            case 0x00000048 -> "ESME_RINVDLMEMBTYP - Invalid distribution list member type";
+            case 0x00000051 -> "ESME_RINVDLMEMBDESC - Invalid distribution list member description";
+            case 0x00000058 -> "ESME_RTHROTTLED - Throttling error (submit message rate exceeded)";
+            case 0x00000061 -> "ESME_RINVSCHED - Invalid scheduled delivery time";
+            case 0x00000062 -> "ESME_RINVEXPIRY - Invalid validity period";
+            case 0x00000063 -> "ESME_RINVDFTMSGID - Invalid predefined message ID";
+            case 0x00000064 -> "ESME_RX_T_APPN - ESME receiver temporary error";
+            case 0x00000065 -> "ESME_RX_P_APPN - ESME receiver permanent error";
+            case 0x00000066 -> "ESME_RINVDATACODNG - Invalid data coding scheme";
+            case 0x00000067 -> "ESME_RINVSRCADDRSUBUNIT - Invalid source address subunit";
+            case 0x00000068 -> "ESME_RINVDSTADDRSUBUNIT - Invalid destination address subunit";
+            case 0x000000C0 -> "ESME_RINVTLVSTREAM - Invalid TLV stream";
+            case 0x000000C1 -> "ESME_RTLVNOTALLWD - TLV not allowed";
+            case 0x000000C2 -> "ESME_RINVTLVLEN - Invalid TLV length";
+            case 0x000000C3 -> "ESME_RMISSINGTLV - Missing TLV";
+            case 0x000000C4 -> "ESME_RINVTLVVAL - Invalid TLV value";
+            case 0x000000FE -> "ESME_RDELIVERYFAILURE - Delivery failure";
+            case 0x000000FF -> "ESME_RUNKNOWNERR - Unknown error";
+            case 0x00000100 -> "ESME_RSERTYPUNAUTH - Service type unauthorized";
+            case 0x00000101 -> "ESME_RPROHIBITED - Prohibited";
+            case 0x00000102 -> "ESME_RSERTYPUNAVAIL - Service type unavailable";
+            case 0x00000103 -> "ESME_RSERTYPDENIED - Service type denied";
+            case 0x00000400 -> "ESME_RSUBMITFAIL - Submit failed (temporary)";
+            default -> String.format("Unknown SMPP error code: 0x%08X", status);
+        };
     }
 }
