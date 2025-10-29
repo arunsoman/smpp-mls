@@ -88,6 +88,8 @@ smpp:
         - system-id: "Shahy"
           password: "Sh@123"
           tps: 150
+          service-type: ""  # Empty for default
+          source-address: "Shahy"  # Default originator/sender ID
       system-type: "SMPP"
       prefixes: ["93-70", "93-71"]
 
