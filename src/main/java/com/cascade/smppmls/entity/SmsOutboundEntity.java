@@ -81,6 +81,15 @@ public class SmsOutboundEntity {
     @Column(name = "sent_at")
     private Instant sentAt;
 
+    @Column(name = "submit_sm_status")
+    private Integer submitSmStatus;
+
+    @Column(name = "submit_sm_error", length = 255)
+    private String submitSmError;
+
+    @Column(name = "submit_response_time_ms")
+    private Long submitResponseTimeMs;
+
     @PrePersist
     public void prePersist() {
         if (createdAt == null) createdAt = Instant.now();
