@@ -74,7 +74,9 @@ public class SessionSender implements Runnable {
             if (toSendHp > 0) {
                 var page = outboundRepository.findByStatusAndSessionIdAndPriority("QUEUED", sessionKey, "HIGH", org.springframework.data.domain.PageRequest.of(0, toSendHp));
                 long hpQueued = page.getTotalElements();
-                log.info("[{}] HP check: toSend={}, queued={}, found={}", sessionKey, toSendHp, hpQueued, page.getContent().size());
+                if (hpQueued > 0) {
+                    log.debug("[{}] HP check: toSend={}, queued={}, found={}", sessionKey, toSendHp, hpQueued, page.getContent().size());
+                }
                 
                 int hpSent = 0;
                 for (SmsOutboundEntity e : page) {
@@ -94,7 +96,9 @@ public class SessionSender implements Runnable {
                 int npCount = (int)Math.floor(tokens.get());
                 var page = outboundRepository.findByStatusAndSessionIdAndPriority("QUEUED", sessionKey, "NORMAL", org.springframework.data.domain.PageRequest.of(0, npCount));
                 long npQueued = page.getTotalElements();
-                log.info("[{}] NP check: toSend={}, queued={}, found={}", sessionKey, npCount, npQueued, page.getContent().size());
+                if (npQueued > 0) {
+                    log.debug("[{}] NP check: toSend={}, queued={}, found={}", sessionKey, npCount, npQueued, page.getContent().size());
+                }
                 
                 int npSent = 0;
                 for (SmsOutboundEntity e : page) {

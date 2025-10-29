@@ -53,10 +53,10 @@ public class OperatorRouter {
             if (op.getSessions() != null && !op.getSessions().isEmpty()) {
                 List<String> sessionIds = new ArrayList<>();
                 for (SmppProperties.Session session : op.getSessions()) {
-                    // Use uuId if available, otherwise systemId
+                    // Use uuId if available, otherwise operatorId:systemId (must match JsmppSessionManager logic)
                     String sessionId = (session.getUuId() != null && !session.getUuId().isEmpty()) 
                         ? session.getUuId() 
-                        : session.getSystemId();
+                        : operatorId + ":" + session.getSystemId();
                     sessionIds.add(sessionId);
                 }
                 operatorSessions.put(operatorId, sessionIds);

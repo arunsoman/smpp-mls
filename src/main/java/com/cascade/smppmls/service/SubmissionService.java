@@ -31,8 +31,8 @@ public class SubmissionService {
         String sessionId = null;
         if (route != null) {
             operator = route[0];
-            // store full session key as operator:systemId so session manager and repository queries align
-            sessionId = route[0] + ":" + route[1];
+            // Use the sessionId directly from router (it's already the correct key: uuId or operator:systemId)
+            sessionId = route[1];
         }
         // Idempotency: if clientMsgId provided and exists, return existing record
         if (req.getClientMsgId() != null && !req.getClientMsgId().isBlank()) {
