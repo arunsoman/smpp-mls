@@ -91,7 +91,7 @@ public class SocketSmppSessionManager implements SmppSessionManager {
 
             int idx = 0;
             for (SmppProperties.Session s : operator.getSessions()) {
-                final String sessionKey = operatorId + ":" + (s.getSystemId() != null ? s.getSystemId() : "session-" + ++idx);
+                final String sessionKey = operatorId + ":" + (s.getSystemId() != null ? s.getSystemId() + "-"+ ++idx : "session-" + ++idx);
                 sessionHealth.put(sessionKey, false);
                 sessionStates.put(sessionKey, SessionState.STARTING);
                 shouldRetry.put(sessionKey, true); // Auto-start sessions should retry

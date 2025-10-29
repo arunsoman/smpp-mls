@@ -2,13 +2,10 @@ package com.cascade.smppmls.smpp;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
-import org.jsmpp.PDUStringException;
 import org.jsmpp.SMPPConstant;
 import org.jsmpp.bean.*;
 import org.jsmpp.extra.ProcessRequestException;
-import org.jsmpp.extra.SessionState;
 import org.jsmpp.session.*;
-import org.jsmpp.util.MessageId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -18,11 +15,11 @@ import com.cascade.smppmls.entity.SmsOutboundEntity;
 import com.cascade.smppmls.repository.SmsOutboundRepository;
 
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * jSMPP-based SMPP session manager.
@@ -100,11 +97,11 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
         int enquireLinkIntervalSec = enquireLinkIntervalMs / 1000;
         logger.info("SMPP Configuration: enquire-link-interval={}ms ({}s), reconnect-delay={}ms", 
             enquireLinkIntervalMs, enquireLinkIntervalSec, smppProperties.getDefaultConfig().getReconnectDelay());
-
         smppProperties.getOperators().forEach((operatorId, operator) -> {
+            AtomicInteger idx = new AtomicInteger();
             if (operator.getSessions() == null) return;
             operator.getSessions().forEach(sessionCfg -> {
-                String sessionKey = operatorId + ":" + sessionCfg.getSystemId();
+                String sessionKey = operatorId + ":" + sessionCfg.getSystemId() + "-" + idx.incrementAndGet();
                 sessionStates.put(sessionKey, SessionState.STARTING);
                 shouldRetry.put(sessionKey, true); // Auto-start sessions should retry
                 // Start a dedicated bind loop for this session to handle reconnect/backoff
@@ -133,7 +130,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                 // Connect and bind
                 String systemId = sessionCfg.getSystemId();
                 String password = sessionCfg.getPassword();
-                String systemType = smppProperties.getDefaultConfig().getSystemType();
+                String systemType = sessionCfg.getSystemType();
                 
                 session.connectAndBind(host, port, 
                     new BindParameter(

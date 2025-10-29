@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: 2222
 
 management:
   endpoints:
@@ -15,59 +15,91 @@ smpp:
     window-size: 100
 
   operators:
-    aftel:
-      host: "localhost"
-      port: 2775
-      sessions:
-        - system-id: "aftel_client1"
-          password: "password"
-          tps: 50
-        - system-id: "aftel_client2"
-          password: "password"
-          tps: 50
-      prefixes: ["93-20", "93-25"]
-    
     roshan:
-      host: "localhost"
-      port: 2776
+      host: "10.150.156.100"
+      port: 20900
+      bind-type: BIND_TRX  # Try BIND_RX or BIND_TRX if this doesn't work
+      interface-version: 0x33  # SMPP 3.4, try 0x33 for 3.3 or 0x50 for 5.0
       sessions:
-        - system-id: "roshan_user1"
-          password: "password"
+        - system-id: "SHAHY"
+          password: "SHAHY"
           tps: 100
-        - system-id: "roshan_user2"
-          password: "password"
-          tps: 100
-      prefixes: ["93-79", "93-77", "93-72"]
-    
-    awcc:
-      host: "localhost"
-      port: 2777
-      sessions:
-        - system-id: "awcc_client1"
-          password: "password"
-          tps: 75
-      prefixes: ["93-70", "93-71"]
-    
+          system-type: "SMPP"
+          # Try empty string if SMPP doesn't work
+      addr-ton: 1  # International
+      addr-npi: 1  # ISDN
+      address-range: ""
+      bind-timeout: 5000  # 5 seconds
+      connect-timeout: 5000  # 5 seconds
+      request-expiry-timeout: 10000  # 10 seconds
+      window-monitor-interval: 10000  # 10 seconds
+      window-size: 1  # Start with 1, increase if needed
+      window-wait-timeout: 20000  # 20 seconds
+      reconnect-delay: 5000  # 5 seconds
+      max-reconnect-delay: 300000  # 5 minutes
+      reconnect-on-connection-loss: true
+      prefixes: [ "93-79",  "93-72" ]
+
+      roshan:
+        host: "10.150.156.100"
+        port: 20900
+        bind-type: BIND_TRX  # Try BIND_RX or BIND_TRX if this doesn't work
+        interface-version: 0x33  # SMPP 3.4, try 0x33 for 3.3 or 0x50 for 5.0
+        sessions:
+          - uuId: "ROSHAN-1"
+            system-id: "SHAHY"
+            password: "SHAHY"
+            tps: 100
+            system-type: "SMPP"
+          - uuId: "ROSHAN-2"
+            system-id: "SHAHY"
+            password: "SHAHY"
+            tps: 100
+            system-type: "SMPP"
+            # Try empty string if SMPP doesn't work
+        addr-ton: 1  # International
+        addr-npi: 1  # ISDN
+        address-range: ""
+        bind-timeout: 5000  # 5 seconds
+        connect-timeout: 5000  # 5 seconds
+        request-expiry-timeout: 10000  # 10 seconds
+        window-monitor-interval: 10000  # 10 seconds
+        window-size: 1  # Start with 1, increase if needed
+        window-wait-timeout: 20000  # 20 seconds
+        reconnect-delay: 5000  # 5 seconds
+        max-reconnect-delay: 300000  # 5 minutes
+        reconnect-on-connection-loss: true
+        prefixes: [ "93-79",  "93-72" ]
+
     mtn:
-      host: "localhost"
-      port: 2778
+      host: "192.168.27.106"
+      port: 9000
       sessions:
-        - system-id: "mtn_client1"
-          password: "password"
-          tps: 90
-        - system-id: "mtn_client2"
-          password: "password"
-          tps: 90
-      prefixes: ["93-78", "93-76"]
-    
-    salaam:
-      host: "localhost"
-      port: 2779
+        - system-id: "Shahy-EVD"
+          password: "Root@123"
+          tps: 200
+      system-type: "SMPP"
+      prefixes: ["93-77", "93-76"]
+#
+    awcc:
+      host: "43.250.139.33"
+      port: 10396
       sessions:
-        - system-id: "salaam_client1"
-          password: "password"
-          tps: 50
-      prefixes: ["93-74", "93-75"]
+        - system-id: "Shahy"
+          password: "Sh@123"
+          tps: 150
+      system-type: "SMPP"
+      prefixes: ["93-70", "93-71"]
+
+#    etisalat:
+#      host: "180.222.136.68"
+#      port: 5016
+#      sessions:
+#        - system-id: "EA_shahy"
+#          password: "es@3y!"
+#          tps: 200
+#      system-type: "SMPP"
+#      prefixes: ["93-74", "93-75"]
 
   retry:
     max-attempts: 5

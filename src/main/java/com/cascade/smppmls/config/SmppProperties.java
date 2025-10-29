@@ -112,6 +112,26 @@ public class SmppProperties {
         private String password;
         private int tps = 100;
 
+        public String getSystemType() {
+            return systemType;
+        }
+
+        public void setSystemType(String systemType) {
+            this.systemType = systemType;
+        }
+
+        private String systemType;
+
+        public String getUuId() {
+            return uuId;
+        }
+
+        public void setUuId(String uuId) {
+            this.uuId = uuId;
+        }
+
+        private String uuId;
+
         public String getSystemId() {
             return systemId;
         }
