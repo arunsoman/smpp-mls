@@ -10,6 +10,7 @@ import org.jsmpp.session.SMPPSession;
 import com.cascade.smppmls.entity.SmsOutboundEntity;
 import com.cascade.smppmls.repository.SmsOutboundRepository;
 import com.cascade.smppmls.util.SmppAddressUtil;
+import com.cascade.smppmls.util.AtomicDouble;
 
 @Slf4j
 public class SessionSender implements Runnable {
@@ -22,9 +23,9 @@ public class SessionSender implements Runnable {
     private final java.util.concurrent.ExecutorService submitExecutor;
     private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
-    // runtime tokens
-    private volatile double tokens;
-    private volatile double hpTokens;
+    // runtime tokens - using AtomicDouble for thread safety
+    private final AtomicDouble tokens;
+    private final AtomicDouble hpTokens;
 
     private ScheduledFuture<?> future;
 
@@ -39,8 +40,8 @@ public class SessionSender implements Runnable {
         this.outboundRepository = outboundRepository;
         this.submitExecutor = submitExecutor;
         this.meterRegistry = meterRegistry;
-        this.tokens = this.tps; // start full
-        this.hpTokens = this.hpMaxPerSecond;
+        this.tokens = new AtomicDouble(this.tps); // start full
+        this.hpTokens = new AtomicDouble(this.hpMaxPerSecond);
         
         log.info("[{}] SessionSender initialized: TPS={}, HP_MAX={}", sessionKey, this.tps, this.hpMaxPerSecond);
     }
@@ -56,14 +57,14 @@ public class SessionSender implements Runnable {
     @Override
     public void run() {
         try {
-            // refill tokens
-            tokens = Math.min(tokens + tps, tps);
-            hpTokens = Math.min(hpTokens + hpMaxPerSecond, hpMaxPerSecond);
+            // refill tokens atomically
+            tokens.updateAndGet(current -> Math.min(current + tps, tps));
+            hpTokens.updateAndGet(current -> Math.min(current + hpMaxPerSecond, hpMaxPerSecond));
 
-            log.debug("[{}] Tick: tokens={}, hpTokens={}", sessionKey, tokens, hpTokens);
+            log.debug("[{}] Tick: tokens={}, hpTokens={}", sessionKey, tokens.get(), hpTokens.get());
 
             // first send HP messages up to hpMaxPerSecond
-            int toSendHp = (int)Math.floor(hpTokens);
+            int toSendHp = (int)Math.floor(hpTokens.get());
             if (toSendHp > 0) {
                 var page = outboundRepository.findByStatusAndSessionIdAndPriority("QUEUED", sessionKey, "HIGH", org.springframework.data.domain.PageRequest.of(0, toSendHp));
                 long hpQueued = page.getTotalElements();
@@ -72,10 +73,10 @@ public class SessionSender implements Runnable {
                 int hpSent = 0;
                 for (SmsOutboundEntity e : page) {
                     submitMessageAsync(e);
-                    tokens = Math.max(0.0, tokens - 1.0);
-                    hpTokens = Math.max(0.0, hpTokens - 1.0);
+                    tokens.updateAndGet(current -> Math.max(0.0, current - 1.0));
+                    hpTokens.updateAndGet(current -> Math.max(0.0, current - 1.0));
                     hpSent++;
-                    if (tokens <= 0.0) break;
+                    if (tokens.get() <= 0.0) break;
                 }
                 if (hpSent > 0) {
                     log.info("[{}] Submitted {} HP messages", sessionKey, hpSent);
@@ -83,8 +84,8 @@ public class SessionSender implements Runnable {
             }
 
             // then send NP messages with remaining tokens
-            if (tokens > 0) {
-                int npCount = (int)Math.floor(tokens);
+            if (tokens.get() > 0) {
+                int npCount = (int)Math.floor(tokens.get());
                 var page = outboundRepository.findByStatusAndSessionIdAndPriority("QUEUED", sessionKey, "NORMAL", org.springframework.data.domain.PageRequest.of(0, npCount));
                 long npQueued = page.getTotalElements();
                 log.debug("[{}] NP check: toSend={}, queued={}", sessionKey, npCount, npQueued);
@@ -92,9 +93,9 @@ public class SessionSender implements Runnable {
                 int npSent = 0;
                 for (SmsOutboundEntity e : page) {
                     submitMessageAsync(e);
-                    tokens = Math.max(0.0, tokens - 1.0);
+                    tokens.updateAndGet(current -> Math.max(0.0, current - 1.0));
                     npSent++;
-                    if (tokens <= 0.0) break;
+                    if (tokens.get() <= 0.0) break;
                 }
                 if (npSent > 0) {
                     log.info("[{}] Submitted {} NP messages", sessionKey, npSent);

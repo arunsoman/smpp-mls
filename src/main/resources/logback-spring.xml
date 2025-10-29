@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- Console appender for development -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p %5pid --- [%15.15t] %-40.40logger{39} : %m%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- File appender for general logs -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/smpp-mls.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/smpp-mls-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>100MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>10GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p %5pid --- [%15.15t] %-40.40logger{39} : %m%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- ASYNC wrapper for FILE appender - for high-volume logs -->
+    <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>512</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>false</neverBlock>
+        <appender-ref ref="FILE"/>
+    </appender>
+
+    <!-- Separate file for SMPP traffic (high volume) -->
+    <appender name="SMPP_TRAFFIC" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/smpp-traffic.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/smpp-traffic-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <maxFileSize>200MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+            <maxHistory>7</maxHistory>
+            <totalSizeCap>5GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} [%t] %m%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- ASYNC wrapper for SMPP traffic - critical for performance -->
+    <appender name="ASYNC_SMPP_TRAFFIC" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>1024</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>true</neverBlock>
+        <maxFlushTime>5000</maxFlushTime>
+        <appender-ref ref="SMPP_TRAFFIC"/>
+    </appender>
+
+    <!-- Separate file for errors -->
+    <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/error.log</file>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>ERROR</level>
+        </filter>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/error-%d{yyyy-MM-dd}.log.gz</fileNamePattern>
+            <maxHistory>90</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p %5pid --- [%15.15t] %-40.40logger{39} : %m%n%ex{full}</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Logger for SessionSender (high volume) - use ASYNC -->
+    <logger name="com.cascade.smppmls.smpp.SessionSender" level="INFO" additivity="false">
+        <appender-ref ref="ASYNC_SMPP_TRAFFIC"/>
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+
+    <!-- Logger for JsmppSessionManager (high volume) - use ASYNC -->
+    <logger name="com.cascade.smppmls.smpp.JsmppSessionManager" level="INFO" additivity="false">
+        <appender-ref ref="ASYNC_SMPP_TRAFFIC"/>
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+
+    <!-- Logger for SocketSmppSessionManager (high volume) - use ASYNC -->
+    <logger name="com.cascade.smppmls.smpp.SocketSmppSessionManager" level="INFO" additivity="false">
+        <appender-ref ref="ASYNC_SMPP_TRAFFIC"/>
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+
+    <!-- Spring framework logs -->
+    <logger name="org.springframework" level="INFO"/>
+    <logger name="org.springframework.web" level="INFO"/>
+    <logger name="org.springframework.boot" level="INFO"/>
+    
+    <!-- Hibernate logs -->
+    <logger name="org.hibernate" level="WARN"/>
+    <logger name="org.hibernate.SQL" level="DEBUG"/>
+    <logger name="org.hibernate.type.descriptor.sql.BasicBinder" level="TRACE"/>
+    
+    <!-- HikariCP logs -->
+    <logger name="com.zaxxer.hikari" level="INFO"/>
+    
+    <!-- jSMPP library logs -->
+    <logger name="org.jsmpp" level="INFO"/>
+
+    <!-- Root logger -->
+    <root level="INFO">
+        <appender-ref ref="ASYNC_FILE"/>
+        <appender-ref ref="ERROR_FILE"/>
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+    <!-- Profile-specific configurations -->
+    <springProfile name="dev">
+        <root level="DEBUG">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="prod">
+        <root level="INFO">
+            <appender-ref ref="ASYNC_FILE"/>
+            <appender-ref ref="ERROR_FILE"/>
+        </root>
+    </springProfile>
+</configuration>

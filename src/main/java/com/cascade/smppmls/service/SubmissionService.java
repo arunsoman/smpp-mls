@@ -2,8 +2,8 @@ package com.cascade.smppmls.service;
 
 import java.util.UUID;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import com.cascade.smppmls.api.SubmitRequest;
@@ -13,18 +13,13 @@ import com.cascade.smppmls.repository.SmsOutboundRepository;
 import com.cascade.smppmls.router.OperatorRouter;
 import com.cascade.smppmls.util.MsisdnUtils;
 
+@Slf4j
 @Service
+@RequiredArgsConstructor
 public class SubmissionService {
-
-    private static final Logger logger = LoggerFactory.getLogger(SubmissionService.class);
 
     private final SmsOutboundRepository outboundRepository;
     private final OperatorRouter router;
-
-    public SubmissionService(SmsOutboundRepository outboundRepository, OperatorRouter router) {
-        this.outboundRepository = outboundRepository;
-        this.router = router;
-    }
 
     public SubmitResponse submit(SubmitRequest req) {
         String normalized = MsisdnUtils.normalizeToE164(req.getMsisdn(), "93");
@@ -70,7 +65,7 @@ public class SubmissionService {
         // persist
         SmsOutboundEntity saved = outboundRepository.save(entity);
 
-        logger.info("Persisted outbound message id={} requestId={} -> {} (operator={}, session={})", saved.getId(), saved.getRequestId(), normalized, operator, sessionId);
+        log.info("Persisted outbound message id={} requestId={} -> {} (operator={}, session={})", saved.getId(), saved.getRequestId(), normalized, operator, sessionId);
 
         // For now messageId equals DB id as string until SMSC responds
         String messageId = saved.getId() != null ? String.valueOf(saved.getId()) : requestId;
