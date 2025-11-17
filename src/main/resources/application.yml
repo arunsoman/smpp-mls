@@ -25,7 +25,8 @@ smpp:
           password: "SHAHY"
           tps: 100
           system-type: "SMPP"
-          # Try empty string if SMPP doesn't work
+          service-type: ""  # Empty for default
+          source-address: "545"  # Default originator/sender ID
       addr-ton: 1  # International
       addr-npi: 1  # ISDN
       address-range: ""
@@ -39,37 +40,6 @@ smpp:
       max-reconnect-delay: 300000  # 5 minutes
       reconnect-on-connection-loss: true
       prefixes: [ "93-79",  "93-72" ]
-
-      roshan:
-        host: "10.150.156.100"
-        port: 20900
-        bind-type: BIND_TRX  # Try BIND_RX or BIND_TRX if this doesn't work
-        interface-version: 0x33  # SMPP 3.4, try 0x33 for 3.3 or 0x50 for 5.0
-        sessions:
-          - uuId: "ROSHAN-1"
-            system-id: "SHAHY"
-            password: "SHAHY"
-            tps: 100
-            system-type: "SMPP"
-          - uuId: "ROSHAN-2"
-            system-id: "SHAHY"
-            password: "SHAHY"
-            tps: 100
-            system-type: "SMPP"
-            # Try empty string if SMPP doesn't work
-        addr-ton: 1  # International
-        addr-npi: 1  # ISDN
-        address-range: ""
-        bind-timeout: 5000  # 5 seconds
-        connect-timeout: 5000  # 5 seconds
-        request-expiry-timeout: 10000  # 10 seconds
-        window-monitor-interval: 10000  # 10 seconds
-        window-size: 1  # Start with 1, increase if needed
-        window-wait-timeout: 20000  # 20 seconds
-        reconnect-delay: 5000  # 5 seconds
-        max-reconnect-delay: 300000  # 5 minutes
-        reconnect-on-connection-loss: true
-        prefixes: [ "93-79",  "93-72" ]
 
     mtn:
       host: "192.168.27.106"
@@ -92,6 +62,18 @@ smpp:
           source-address: "Shahy"  # Default originator/sender ID
       system-type: "SMPP"
       prefixes: ["93-70", "93-71"]
+
+    etisalat:
+      host: "16.170.19.245"
+      port: 2775
+      sessions:
+        - system-id: "EA_shahy"
+          password: "es@3y!"
+          tps: 150
+          service-type: ""  # Empty for default
+          source-address: "545"  # Default originator/sender ID
+      system-type: "SMPP"
+      prefixes: [ "93-73", "93-78" ]
 
 #    etisalat:
 #      host: "180.222.136.68"

@@ -34,30 +34,23 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
-    
+
     // Database
     runtimeOnly 'com.h2database:h2'
     runtimeOnly 'org.postgresql:postgresql'
-    
+    runtimeOnly 'mysql:mysql-connector-java:8.0.30'  // Specify the version here
+
     // Monitoring
     implementation 'io.micrometer:micrometer-registry-prometheus'
-    
+
     // SMPP - Using jSMPP from JitPack
     // https://mvnrepository.com/artifact/org.jsmpp/jsmpp
     implementation("org.jsmpp:jsmpp:3.0.1")
 
-    // Add a secure version of Netty
-//    implementation platform('io.netty:netty-bom:4.1.100.Final')
-//    implementation 'io.netty:netty-common'
-//    implementation 'io.netty:netty-buffer'
-//    implementation 'io.netty:netty-transport'
-//    implementation 'io.netty:netty-codec'
-//    implementation 'io.netty:netty-handler'
-//
     // Lombok - Updated to version compatible with Java 21
     compileOnly 'org.projectlombok:lombok:1.18.30'
     annotationProcessor 'org.projectlombok:lombok:1.18.30'
-    
+
     // Testing
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }
