@@ -114,13 +114,15 @@ public class AdminDashboardController {
         overview.put("totalSessions", sessionHealth.size());
         
         // Messages today
-        String todaySql = "SELECT COUNT(*) FROM sms_outbound WHERE created_at >= CURRENT_DATE";
-        Long messagesToday = jdbcTemplate.queryForObject(todaySql, Long.class);
+        Instant startOfToday = Instant.now().truncatedTo(ChronoUnit.DAYS);
+        String todaySql = "SELECT COUNT(*) FROM sms_outbound WHERE created_at >= ?";
+        Long messagesToday = jdbcTemplate.queryForObject(todaySql, Long.class, startOfToday);
         overview.put("messagesToday", messagesToday);
         
         // Messages last hour
-        String hourSql = "SELECT COUNT(*) FROM sms_outbound WHERE created_at >= DATEADD('HOUR', -1, CURRENT_TIMESTAMP)";
-        Long messagesLastHour = jdbcTemplate.queryForObject(hourSql, Long.class);
+        Instant oneHourAgo = Instant.now().minus(1, ChronoUnit.HOURS);
+        String hourSql = "SELECT COUNT(*) FROM sms_outbound WHERE created_at >= ?";
+        Long messagesLastHour = jdbcTemplate.queryForObject(hourSql, Long.class, oneHourAgo);
         overview.put("messagesLastHour", messagesLastHour);
         
         return ResponseEntity.ok(overview);
@@ -204,36 +206,39 @@ public class AdminDashboardController {
     public ResponseEntity<Map<String, Object>> getThroughputMetrics() {
         Map<String, Object> throughput = new LinkedHashMap<>();
         
-        // Messages per minute (last 10 minutes) - simplified for H2
+        // Messages per minute (last 10 minutes) - database agnostic
+        Instant tenMinutesAgo = Instant.now().minus(10, ChronoUnit.MINUTES);
         String minuteSql = 
-            "SELECT FORMATDATETIME(created_at, 'yyyy-MM-dd HH:mm') as \"MINUTE\", " +
-            "COUNT(*) as \"COUNT\" " +
+            "SELECT FLOOR(EXTRACT(EPOCH FROM created_at) / 60) as minute_bucket, " +
+            "COUNT(*) as message_count " +
             "FROM sms_outbound " +
-            "WHERE created_at >= DATEADD('MINUTE', -10, CURRENT_TIMESTAMP) " +
-            "GROUP BY FORMATDATETIME(created_at, 'yyyy-MM-dd HH:mm') " +
-            "ORDER BY \"MINUTE\" DESC " +
+            "WHERE created_at >= ? " +
+            "GROUP BY FLOOR(EXTRACT(EPOCH FROM created_at) / 60) " +
+            "ORDER BY minute_bucket DESC " +
             "LIMIT 10";
         
-        List<Map<String, Object>> perMinute = jdbcTemplate.queryForList(minuteSql);
+        List<Map<String, Object>> perMinute = jdbcTemplate.queryForList(minuteSql, tenMinutesAgo);
         throughput.put("messagesPerMinute", perMinute);
         
         // Current TPS (messages in last minute / 60)
-        String tpsSql = "SELECT COUNT(*) FROM sms_outbound WHERE created_at >= DATEADD('SECOND', -60, CURRENT_TIMESTAMP)";
-        Long messagesLastMinute = jdbcTemplate.queryForObject(tpsSql, Long.class);
+        Instant sixtySecondsAgo = Instant.now().minus(60, ChronoUnit.SECONDS);
+        String tpsSql = "SELECT COUNT(*) FROM sms_outbound WHERE created_at >= ?";
+        Long messagesLastMinute = jdbcTemplate.queryForObject(tpsSql, Long.class, sixtySecondsAgo);
         double currentTps = messagesLastMinute != null ? messagesLastMinute / 60.0 : 0;
         throughput.put("currentTps", Math.round(currentTps * 100.0) / 100.0);
         
-        // Peak TPS (highest minute in last hour) - simplified for H2
+        // Peak TPS (highest minute in last hour) - database agnostic
+        Instant oneHourAgo2 = Instant.now().minus(1, ChronoUnit.HOURS);
         String peakSql = 
             "SELECT MAX(cnt) as peak FROM (" +
             "  SELECT COUNT(*) as cnt " +
             "  FROM sms_outbound " +
-            "  WHERE created_at >= DATEADD('HOUR', -1, CURRENT_TIMESTAMP) " +
-            "  GROUP BY FORMATDATETIME(created_at, 'yyyy-MM-dd HH:mm')" +
-            ")";
+            "  WHERE created_at >= ? " +
+            "  GROUP BY FLOOR(EXTRACT(EPOCH FROM created_at) / 60)" +
+            ") subquery";
         
         try {
-            Long peakPerMinute = jdbcTemplate.queryForObject(peakSql, Long.class);
+            Long peakPerMinute = jdbcTemplate.queryForObject(peakSql, Long.class, oneHourAgo2);
             double peakTps = peakPerMinute != null ? peakPerMinute / 60.0 : 0;
             throughput.put("peakTps", Math.round(peakTps * 100.0) / 100.0);
         } catch (Exception e) {
@@ -241,13 +246,14 @@ public class AdminDashboardController {
         }
         
         // Throughput by operator
+        Instant oneHourAgo3 = Instant.now().minus(1, ChronoUnit.HOURS);
         String operatorSql = 
             "SELECT operator, COUNT(*) as count " +
             "FROM sms_outbound " +
-            "WHERE created_at >= DATEADD('HOUR', -1, CURRENT_TIMESTAMP) " +
+            "WHERE created_at >= ? " +
             "GROUP BY operator";
         
-        List<Map<String, Object>> byOperator = jdbcTemplate.queryForList(operatorSql);
+        List<Map<String, Object>> byOperator = jdbcTemplate.queryForList(operatorSql, oneHourAgo3);
         throughput.put("byOperator", byOperator);
         
         return ResponseEntity.ok(throughput);
@@ -272,73 +278,75 @@ public class AdminDashboardController {
             metrics.put("operator", operator);
             
             // Success Rate - Last 1 hour
+            Instant oneHourAgo = Instant.now().minus(1, ChronoUnit.HOURS);
             String successRate1hSql = 
                 "SELECT " +
-                "SUM(CASE WHEN status = 'SENT' OR status LIKE '%DELIVR%' THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as rate " +
+                "SUM(CASE WHEN status = 'SENT' OR status LIKE '%DELIVR%' THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0) as rate " +
                 "FROM sms_outbound " +
-                "WHERE operator = ? AND created_at >= DATEADD('HOUR', -1, CURRENT_TIMESTAMP)";
-            Double successRate1h = jdbcTemplate.queryForObject(successRate1hSql, Double.class, operator);
+                "WHERE operator = ? AND created_at >= ?";
+            Double successRate1h = jdbcTemplate.queryForObject(successRate1hSql, Double.class, operator, oneHourAgo);
             metrics.put("successRate1h", successRate1h != null ? Math.round(successRate1h * 100.0) / 100.0 : 0);
             
             // Success Rate - Last 5 minutes
+            Instant fiveMinutesAgo = Instant.now().minus(5, ChronoUnit.MINUTES);
             String successRate5mSql = 
                 "SELECT " +
-                "SUM(CASE WHEN status = 'SENT' OR status LIKE '%DELIVR%' THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as rate " +
+                "SUM(CASE WHEN status = 'SENT' OR status LIKE '%DELIVR%' THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0) as rate " +
                 "FROM sms_outbound " +
-                "WHERE operator = ? AND created_at >= DATEADD('MINUTE', -5, CURRENT_TIMESTAMP)";
-            Double successRate5m = jdbcTemplate.queryForObject(successRate5mSql, Double.class, operator);
+                "WHERE operator = ? AND created_at >= ?";
+            Double successRate5m = jdbcTemplate.queryForObject(successRate5mSql, Double.class, operator, fiveMinutesAgo);
             metrics.put("successRate5m", successRate5m != null ? Math.round(successRate5m * 100.0) / 100.0 : 0);
             
             // Retry Rate - Last 1 hour
             String retryRate1hSql = 
                 "SELECT " +
-                "SUM(CASE WHEN retry_count > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as rate " +
+                "SUM(CASE WHEN retry_count > 0 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0) as rate " +
                 "FROM sms_outbound " +
-                "WHERE operator = ? AND created_at >= DATEADD('HOUR', -1, CURRENT_TIMESTAMP)";
-            Double retryRate1h = jdbcTemplate.queryForObject(retryRate1hSql, Double.class, operator);
+                "WHERE operator = ? AND created_at >= ?";
+            Double retryRate1h = jdbcTemplate.queryForObject(retryRate1hSql, Double.class, operator, oneHourAgo);
             metrics.put("retryRate1h", retryRate1h != null ? Math.round(retryRate1h * 100.0) / 100.0 : 0);
             
             // Retry Rate - Last 5 minutes
             String retryRate5mSql = 
                 "SELECT " +
-                "SUM(CASE WHEN retry_count > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as rate " +
+                "SUM(CASE WHEN retry_count > 0 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0) as rate " +
                 "FROM sms_outbound " +
-                "WHERE operator = ? AND created_at >= DATEADD('MINUTE', -5, CURRENT_TIMESTAMP)";
-            Double retryRate5m = jdbcTemplate.queryForObject(retryRate5mSql, Double.class, operator);
+                "WHERE operator = ? AND created_at >= ?";
+            Double retryRate5m = jdbcTemplate.queryForObject(retryRate5mSql, Double.class, operator, fiveMinutesAgo);
             metrics.put("retryRate5m", retryRate5m != null ? Math.round(retryRate5m * 100.0) / 100.0 : 0);
             
             // Submit Delay - Last 1 hour (time from created to sent)
             String submitDelay1hSql = 
-                "SELECT AVG(TIMESTAMPDIFF(MILLISECOND, created_at, updated_at)) as avg_delay " +
+                "SELECT AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) * 1000) as avg_delay " +
                 "FROM sms_outbound " +
-                "WHERE operator = ? AND status = 'SENT' AND created_at >= DATEADD('HOUR', -1, CURRENT_TIMESTAMP)";
-            Double submitDelay1h = jdbcTemplate.queryForObject(submitDelay1hSql, Double.class, operator);
+                "WHERE operator = ? AND status = 'SENT' AND created_at >= ?";
+            Double submitDelay1h = jdbcTemplate.queryForObject(submitDelay1hSql, Double.class, operator, oneHourAgo);
             metrics.put("submitDelay1h", submitDelay1h != null ? Math.round(submitDelay1h) : 0);
             
             // Submit Delay - Last 5 minutes
             String submitDelay5mSql = 
-                "SELECT AVG(TIMESTAMPDIFF(MILLISECOND, created_at, updated_at)) as avg_delay " +
+                "SELECT AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) * 1000) as avg_delay " +
                 "FROM sms_outbound " +
-                "WHERE operator = ? AND status = 'SENT' AND created_at >= DATEADD('MINUTE', -5, CURRENT_TIMESTAMP)";
-            Double submitDelay5m = jdbcTemplate.queryForObject(submitDelay5mSql, Double.class, operator);
+                "WHERE operator = ? AND status = 'SENT' AND created_at >= ?";
+            Double submitDelay5m = jdbcTemplate.queryForObject(submitDelay5mSql, Double.class, operator, fiveMinutesAgo);
             metrics.put("submitDelay5m", submitDelay5m != null ? Math.round(submitDelay5m) : 0);
             
             // DR Delay - Last 1 hour (time from sent to DR received)
             String drDelay1hSql = 
-                "SELECT AVG(TIMESTAMPDIFF(MILLISECOND, o.updated_at, d.received_at)) as avg_delay " +
+                "SELECT AVG(EXTRACT(EPOCH FROM (d.received_at - o.updated_at)) * 1000) as avg_delay " +
                 "FROM sms_dlr d " +
                 "JOIN sms_outbound o ON d.sms_outbound_id = o.id " +
-                "WHERE o.operator = ? AND d.received_at >= DATEADD('HOUR', -1, CURRENT_TIMESTAMP)";
-            Double drDelay1h = jdbcTemplate.queryForObject(drDelay1hSql, Double.class, operator);
+                "WHERE o.operator = ? AND d.received_at >= ?";
+            Double drDelay1h = jdbcTemplate.queryForObject(drDelay1hSql, Double.class, operator, oneHourAgo);
             metrics.put("drDelay1h", drDelay1h != null ? Math.round(drDelay1h) : 0);
             
             // DR Delay - Last 5 minutes
             String drDelay5mSql = 
-                "SELECT AVG(TIMESTAMPDIFF(MILLISECOND, o.updated_at, d.received_at)) as avg_delay " +
+                "SELECT AVG(EXTRACT(EPOCH FROM (d.received_at - o.updated_at)) * 1000) as avg_delay " +
                 "FROM sms_dlr d " +
                 "JOIN sms_outbound o ON d.sms_outbound_id = o.id " +
-                "WHERE o.operator = ? AND d.received_at >= DATEADD('MINUTE', -5, CURRENT_TIMESTAMP)";
-            Double drDelay5m = jdbcTemplate.queryForObject(drDelay5mSql, Double.class, operator);
+                "WHERE o.operator = ? AND d.received_at >= ?";
+            Double drDelay5m = jdbcTemplate.queryForObject(drDelay5mSql, Double.class, operator, fiveMinutesAgo);
             metrics.put("drDelay5m", drDelay5m != null ? Math.round(drDelay5m) : 0);
             
             operatorMetrics.add(metrics);
@@ -357,12 +365,13 @@ public class AdminDashboardController {
         Map<String, Object> performance = new LinkedHashMap<>();
         
         // Average submission delay (time from received to sent)
+        Instant oneHourAgo = Instant.now().minus(1, ChronoUnit.HOURS);
         String avgDelaySql = 
-            "SELECT AVG(TIMESTAMPDIFF(MILLISECOND, created_at, updated_at)) as avg_delay " +
+            "SELECT AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) * 1000) as avg_delay " +
             "FROM sms_outbound " +
-            "WHERE status = 'SENT' AND created_at >= DATEADD('HOUR', -1, CURRENT_TIMESTAMP)";
+            "WHERE status = 'SENT' AND created_at >= ?";
         
-        Double avgDelay = jdbcTemplate.queryForObject(avgDelaySql, Double.class);
+        Double avgDelay = jdbcTemplate.queryForObject(avgDelaySql, Double.class, oneHourAgo);
         performance.put("avgSubmissionDelayMs", avgDelay != null ? Math.round(avgDelay) : 0);
         
         // Delivery success rate
@@ -371,10 +380,10 @@ public class AdminDashboardController {
             "SUM(CASE WHEN status LIKE '%DELIVR%' THEN 1 ELSE 0 END) as delivered, " +
             "COUNT(*) as total " +
             "FROM sms_dlr " +
-            "WHERE received_at >= DATEADD('HOUR', -1, CURRENT_TIMESTAMP)";
+            "WHERE received_at >= ?";
         
         try {
-            Map<String, Object> deliveryStats = jdbcTemplate.queryForMap(deliverySql);
+            Map<String, Object> deliveryStats = jdbcTemplate.queryForMap(deliverySql, oneHourAgo);
             Object deliveredObj = deliveryStats.get("DELIVERED");
             Object totalObj = deliveryStats.get("TOTAL");
             long delivered = deliveredObj != null ? ((Number) deliveredObj).longValue() : 0;
@@ -387,12 +396,12 @@ public class AdminDashboardController {
         
         // Average delivery time
         String avgDeliveryTimeSql = 
-            "SELECT AVG(TIMESTAMPDIFF(MILLISECOND, o.created_at, d.received_at)) as avg_time " +
+            "SELECT AVG(EXTRACT(EPOCH FROM (d.received_at - o.created_at)) * 1000) as avg_time " +
             "FROM sms_dlr d " +
             "JOIN sms_outbound o ON d.sms_outbound_id = o.id " +
-            "WHERE d.received_at >= DATEADD('HOUR', -1, CURRENT_TIMESTAMP)";
+            "WHERE d.received_at >= ?";
         
-        Double avgDeliveryTime = jdbcTemplate.queryForObject(avgDeliveryTimeSql, Double.class);
+        Double avgDeliveryTime = jdbcTemplate.queryForObject(avgDeliveryTimeSql, Double.class, oneHourAgo);
         performance.put("avgDeliveryTimeMs", avgDeliveryTime != null ? Math.round(avgDeliveryTime) : 0);
         
         // Retry rate
@@ -401,10 +410,10 @@ public class AdminDashboardController {
             "SUM(CASE WHEN retry_count > 0 THEN 1 ELSE 0 END) as retried, " +
             "COUNT(*) as total " +
             "FROM sms_outbound " +
-            "WHERE created_at >= DATEADD('HOUR', -1, CURRENT_TIMESTAMP)";
+            "WHERE created_at >= ?";
         
         try {
-            Map<String, Object> retryStats = jdbcTemplate.queryForMap(retrySql);
+            Map<String, Object> retryStats = jdbcTemplate.queryForMap(retrySql, oneHourAgo);
             Object retriedObj = retryStats.get("RETRIED");
             Object totalObj = retryStats.get("TOTAL");
             long retried = retriedObj != null ? ((Number) retriedObj).longValue() : 0;
@@ -471,13 +480,14 @@ public class AdminDashboardController {
         }
         
         // Check for high retry rate
+        Instant fiveMinutesAgo = Instant.now().minus(5, ChronoUnit.MINUTES);
         String retryRateSql = 
             "SELECT " +
-            "SUM(CASE WHEN retry_count > 0 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as retry_rate " +
+            "SUM(CASE WHEN retry_count > 0 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(*), 0) as retry_rate " +
             "FROM sms_outbound " +
-            "WHERE created_at >= DATEADD('MINUTE', -5, CURRENT_TIMESTAMP)";
+            "WHERE created_at >= ?";
         
-        Double retryRate = jdbcTemplate.queryForObject(retryRateSql, Double.class);
+        Double retryRate = jdbcTemplate.queryForObject(retryRateSql, Double.class, fiveMinutesAgo);
         
         if (retryRate != null && retryRate > 10) {
             Map<String, Object> alert = new LinkedHashMap<>();
