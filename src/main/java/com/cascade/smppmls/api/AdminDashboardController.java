@@ -209,11 +209,11 @@ public class AdminDashboardController {
         // Messages per minute (last 10 minutes) - database agnostic
         Instant tenMinutesAgo = Instant.now().minus(10, ChronoUnit.MINUTES);
         String minuteSql = 
-            "SELECT FLOOR(EXTRACT(EPOCH FROM created_at) / 60) as minute_bucket, " +
+            "SELECT FLOOR(UNIX_TIMESTAMP(created_at) / 60) as minute_bucket, " +
             "COUNT(*) as message_count " +
             "FROM sms_outbound " +
             "WHERE created_at >= ? " +
-            "GROUP BY FLOOR(EXTRACT(EPOCH FROM created_at) / 60) " +
+            "GROUP BY FLOOR(UNIX_TIMESTAMP(created_at) / 60) " +
             "ORDER BY minute_bucket DESC " +
             "LIMIT 10";
         
@@ -234,7 +234,7 @@ public class AdminDashboardController {
             "  SELECT COUNT(*) as cnt " +
             "  FROM sms_outbound " +
             "  WHERE created_at >= ? " +
-            "  GROUP BY FLOOR(EXTRACT(EPOCH FROM created_at) / 60)" +
+            "  GROUP BY FLOOR(UNIX_TIMESTAMP(created_at) / 60)" +
             ") subquery";
         
         try {
@@ -317,7 +317,7 @@ public class AdminDashboardController {
             
             // Submit Delay - Last 1 hour (time from created to sent)
             String submitDelay1hSql = 
-                "SELECT AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) * 1000) as avg_delay " +
+                "SELECT AVG(TIMESTAMPDIFF(MICROSECOND, created_at, updated_at) / 1000.0) as avg_delay " +
                 "FROM sms_outbound " +
                 "WHERE operator = ? AND status = 'SENT' AND created_at >= ?";
             Double submitDelay1h = jdbcTemplate.queryForObject(submitDelay1hSql, Double.class, operator, oneHourAgo);
@@ -325,7 +325,7 @@ public class AdminDashboardController {
             
             // Submit Delay - Last 5 minutes
             String submitDelay5mSql = 
-                "SELECT AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) * 1000) as avg_delay " +
+                "SELECT AVG(TIMESTAMPDIFF(MICROSECOND, created_at, updated_at) / 1000.0) as avg_delay " +
                 "FROM sms_outbound " +
                 "WHERE operator = ? AND status = 'SENT' AND created_at >= ?";
             Double submitDelay5m = jdbcTemplate.queryForObject(submitDelay5mSql, Double.class, operator, fiveMinutesAgo);
@@ -333,7 +333,7 @@ public class AdminDashboardController {
             
             // DR Delay - Last 1 hour (time from sent to DR received)
             String drDelay1hSql = 
-                "SELECT AVG(EXTRACT(EPOCH FROM (d.received_at - o.updated_at)) * 1000) as avg_delay " +
+                "SELECT AVG(TIMESTAMPDIFF(MICROSECOND, o.updated_at, d.received_at) / 1000.0) as avg_delay " +
                 "FROM sms_dlr d " +
                 "JOIN sms_outbound o ON d.sms_outbound_id = o.id " +
                 "WHERE o.operator = ? AND d.received_at >= ?";
@@ -342,7 +342,7 @@ public class AdminDashboardController {
             
             // DR Delay - Last 5 minutes
             String drDelay5mSql = 
-                "SELECT AVG(EXTRACT(EPOCH FROM (d.received_at - o.updated_at)) * 1000) as avg_delay " +
+                "SELECT AVG(TIMESTAMPDIFF(MICROSECOND, o.updated_at, d.received_at) / 1000.0) as avg_delay " +
                 "FROM sms_dlr d " +
                 "JOIN sms_outbound o ON d.sms_outbound_id = o.id " +
                 "WHERE o.operator = ? AND d.received_at >= ?";
@@ -367,7 +367,7 @@ public class AdminDashboardController {
         // Average submission delay (time from received to sent)
         Instant oneHourAgo = Instant.now().minus(1, ChronoUnit.HOURS);
         String avgDelaySql = 
-            "SELECT AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) * 1000) as avg_delay " +
+            "SELECT AVG(TIMESTAMPDIFF(MICROSECOND, created_at, updated_at) / 1000.0) as avg_delay " +
             "FROM sms_outbound " +
             "WHERE status = 'SENT' AND created_at >= ?";
         
@@ -396,7 +396,7 @@ public class AdminDashboardController {
         
         // Average delivery time
         String avgDeliveryTimeSql = 
-            "SELECT AVG(EXTRACT(EPOCH FROM (d.received_at - o.created_at)) * 1000) as avg_time " +
+            "SELECT AVG(TIMESTAMPDIFF(MICROSECOND, o.created_at, d.received_at) / 1000.0) as avg_time " +
             "FROM sms_dlr d " +
             "JOIN sms_outbound o ON d.sms_outbound_id = o.id " +
             "WHERE d.received_at >= ?";
