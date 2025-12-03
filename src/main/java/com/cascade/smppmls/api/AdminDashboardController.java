@@ -222,7 +222,17 @@ public class AdminDashboardController {
             "LIMIT 10";
         
         List<Map<String, Object>> perMinute = jdbcTemplate.queryForList(minuteSql, tenMinutesAgo);
-        throughput.put("messagesPerMinute", perMinute);
+        // Normalize keys for frontend
+        List<Map<String, Object>> normalizedPerMinute = new ArrayList<>();
+        for (Map<String, Object> row : perMinute) {
+            Map<String, Object> normalized = new HashMap<>();
+            Object minute = row.get("MINUTE_BUCKET") != null ? row.get("MINUTE_BUCKET") : row.get("minute_bucket");
+            Object count = row.get("MESSAGE_COUNT") != null ? row.get("MESSAGE_COUNT") : row.get("message_count");
+            if (minute != null) normalized.put("MINUTE", minute);
+            if (count != null) normalized.put("COUNT", count);
+            normalizedPerMinute.add(normalized);
+        }
+        throughput.put("messagesPerMinute", normalizedPerMinute);
         
         // Current TPS (messages in last minute / 60)
         Instant sixtySecondsAgo = Instant.now().minus(60, ChronoUnit.SECONDS);
