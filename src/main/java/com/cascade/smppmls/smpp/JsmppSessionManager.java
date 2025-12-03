@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 @Slf4j
 @Component
+@Primary
 @RequiredArgsConstructor
 public class JsmppSessionManager implements SmppSessionManager, MessageReceiverListener {
 
