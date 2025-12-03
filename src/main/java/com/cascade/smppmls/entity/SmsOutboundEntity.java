@@ -42,7 +42,7 @@ public class SmsOutboundEntity {
     @Column(name = "source_addr", length = 20)
     private String sourceAddr;
 
-    @Column(name = "message", columnDefinition = "text")
+    @Column(name = "message", length = 4000)
     private String message;
 
     @Column(name = "priority", length = 10)
