@@ -53,11 +53,22 @@ public class OperatorRouter {
             if (op.getSessions() != null && !op.getSessions().isEmpty()) {
                 List<String> sessionIds = new ArrayList<>();
                 for (SmppProperties.Session session : op.getSessions()) {
-                    // Use uuId if available, otherwise operatorId:systemId (must match JsmppSessionManager logic)
-                    String sessionId = (session.getUuId() != null && !session.getUuId().isEmpty()) 
-                        ? session.getUuId() 
+                    // Determine base session key
+                    String baseId = (session.getUuId() != null && !session.getUuId().isEmpty())
+                        ? session.getUuId()
                         : operatorId + ":" + session.getSystemId();
-                    sessionIds.add(sessionId);
+                    
+                    // Get session count (default to 1 if not specified)
+                    int sessionCount = session.getSessionCount() > 0 ? session.getSessionCount() : 1;
+                    
+                    // Expand sessions based on sessionCount
+                    if (sessionCount > 1) {
+                        for (int i = 1; i <= sessionCount; i++) {
+                            sessionIds.add(baseId + "-" + i);
+                        }
+                    } else {
+                        sessionIds.add(baseId);
+                    }
                 }
                 operatorSessions.put(operatorId, sessionIds);
                 sessionRoundRobin.put(operatorId, new AtomicInteger(0));
