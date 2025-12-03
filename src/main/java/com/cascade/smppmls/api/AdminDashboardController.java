@@ -94,7 +94,11 @@ public class AdminDashboardController {
         
         Map<String, Long> byStatus = new HashMap<>();
         for (Map<String, Object> row : statusCounts) {
-            byStatus.put((String) row.get("STATUS"), ((Number) row.get("COUNT")).longValue());
+            String status = (String) (row.get("STATUS") != null ? row.get("STATUS") : row.get("status"));
+            Number count = (Number) (row.get("COUNT") != null ? row.get("COUNT") : row.get("count"));
+            if (status != null && count != null) {
+                byStatus.put(status, count.longValue());
+            }
         }
         overview.put("messagesByStatus", byStatus);
         
@@ -414,8 +418,8 @@ public class AdminDashboardController {
         
         try {
             Map<String, Object> retryStats = jdbcTemplate.queryForMap(retrySql, oneHourAgo);
-            Object retriedObj = retryStats.get("RETRIED");
-            Object totalObj = retryStats.get("TOTAL");
+            Object retriedObj = retryStats.get("RETRIED") != null ? retryStats.get("RETRIED") : retryStats.get("retried");
+            Object totalObj = retryStats.get("TOTAL") != null ? retryStats.get("TOTAL") : retryStats.get("total");
             long retried = retriedObj != null ? ((Number) retriedObj).longValue() : 0;
             long totalRetry = totalObj != null ? ((Number) totalObj).longValue() : 0;
             double retryRate = totalRetry > 0 ? (double) retried / totalRetry * 100 : 0;

@@ -719,9 +719,9 @@
                         <div class="session-name">${s.sessionId}</div>
                         <div class="session-metrics">
                             <div>Status: <span class="badge badge-${isConnected ? 'success' : isRetrying ? 'warning' : isStopped ? 'danger' : 'info'}">${status}</span></div>
-                            <div>Sent: <span>${s.metrics.SENT || 0}</span></div>
-                            <div>Queued: <span>${s.metrics.QUEUED || 0}</span></div>
-                            <div>Failed: <span>${s.metrics.FAILED || 0}</span></div>
+                            <div>Sent: <span>${(s.metrics && s.metrics.sent) || 0}</span></div>
+                            <div>Queued: <span>${(s.metrics && s.metrics.queued) || 0}</span></div>
+                            <div>Failed: <span>${(s.metrics && s.metrics.failed) || 0}</span></div>
                         </div>
                     </div>
                     <button class="btn ${buttonClass}" 
@@ -736,13 +736,13 @@
             // Activity
             document.getElementById('activity').innerHTML = (data.recentActivity || []).slice(0, 50).map(m => `
                 <tr>
-                    <td>${m.ID}</td>
-                    <td>${m.MSISDN}</td>
-                    <td>${m.PRIORITY}</td>
-                    <td><span class="badge badge-${m.STATUS.toLowerCase() === 'sent' ? 'success' : m.STATUS.toLowerCase() === 'failed' ? 'danger' : m.STATUS.toLowerCase() === 'delivered' ? 'info' : 'warning'}">${m.STATUS}</span></td>
-                    <td>${m.OPERATOR || 'N/A'}</td>
-                    <td>${m.SESSION_ID || 'N/A'}</td>
-                    <td>${new Date(m.CREATED_AT).toLocaleString()}</td>
+                    <td>${m.id || m.ID}</td>
+                    <td>${m.msisdn || m.MSISDN}</td>
+                    <td>${m.priority || m.PRIORITY}</td>
+                    <td><span class="badge badge-${(m.status || m.STATUS || '').toLowerCase() === 'sent' ? 'success' : (m.status || m.STATUS || '').toLowerCase() === 'failed' ? 'danger' : (m.status || m.STATUS || '').toLowerCase() === 'delivered' ? 'info' : 'warning'}">${m.status || m.STATUS}</span></td>
+                    <td>${m.operator || m.OPERATOR || 'N/A'}</td>
+                    <td>${m.session_id || m.SESSION_ID || 'N/A'}</td>
+                    <td>${new Date(m.created_at || m.CREATED_AT).toLocaleString()}</td>
                 </tr>
             `).join('');
 

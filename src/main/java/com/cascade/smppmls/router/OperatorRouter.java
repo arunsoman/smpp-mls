@@ -126,4 +126,13 @@ public class OperatorRouter {
         
         return stats;
     }
+    
+    /**
+     * Get all session IDs for a specific operator
+     * @param operatorId the operator ID
+     * @return list of session IDs for the operator, or empty list if not found
+     */
+    public List<String> getSessionsForOperator(String operatorId) {
+        return operatorSessions.getOrDefault(operatorId, List.of());
+    }
 }
