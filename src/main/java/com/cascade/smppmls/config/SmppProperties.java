@@ -40,5 +40,6 @@ public class SmppProperties {
         private String serviceType = ""; // Default empty service type
         private String sourceAddress = ""; // Default source address (originator)
         private int tps = 100;
+        private int sessionCount = 1; // Number of concurrent binds with same credentials
     }
 }

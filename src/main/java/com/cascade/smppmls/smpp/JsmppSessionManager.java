@@ -100,31 +100,31 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                 return;
             }
             
-            // Check if multiple sessions require uuId
-            if (operator.getSessions().size() > 1) {
-                for (SmppProperties.Session s : operator.getSessions()) {
-                    if (s.getUuId() == null || s.getUuId().trim().isEmpty()) {
-                        throw new IllegalStateException(
-                            String.format("Operator '%s' has multiple sessions but session with systemId '%s' is missing uuId. " +
-                                "uuId is required when multiple sessions are configured.", 
-                                operatorId, s.getSystemId()));
-                    }
-                }
-            }
-            
             operator.getSessions().forEach(sessionCfg -> {
-                // Use uuId if available, otherwise use operatorId:systemId for single session
-                String sessionKey;
+                // Determine base session key
+                String baseKey;
                 if (sessionCfg.getUuId() != null && !sessionCfg.getUuId().trim().isEmpty()) {
-                    sessionKey = sessionCfg.getUuId();
+                    baseKey = sessionCfg.getUuId();
                 } else {
-                    sessionKey = operatorId + ":" + sessionCfg.getSystemId();
+                    baseKey = operatorId + ":" + sessionCfg.getSystemId();
                 }
                 
-                sessionStates.put(sessionKey, SessionState.STARTING);
-                shouldRetry.put(sessionKey, true); // Auto-start sessions should retry
-                // Start a dedicated bind loop for this session to handle reconnect/backoff using virtual thread
-                bindLoopExecutor.execute(() -> bindLoop(sessionKey, operatorId, sessionCfg, operator.getHost(), operator.getPort()));
+                // Get session count (default to 1 if not specified)
+                int sessionCount = sessionCfg.getSessionCount() > 0 ? sessionCfg.getSessionCount() : 1;
+                
+                // Create multiple sessions if sessionCount > 1
+                for (int i = 1; i <= sessionCount; i++) {
+                    String sessionKey = (sessionCount > 1) ? baseKey + "-" + i : baseKey;
+                    
+                    log.info("Initializing session: {} (operator={}, systemId={}, count={}/{})", 
+                        sessionKey, operatorId, sessionCfg.getSystemId(), i, sessionCount);
+                    
+                    sessionStates.put(sessionKey, SessionState.STARTING);
+                    shouldRetry.put(sessionKey, true); // Auto-start sessions should retry
+                    
+                    // Start a dedicated bind loop for this session to handle reconnect/backoff using virtual thread
+                    bindLoopExecutor.execute(() -> bindLoop(sessionKey, operatorId, sessionCfg, operator.getHost(), operator.getPort()));
+                }
             });
         });
     }
