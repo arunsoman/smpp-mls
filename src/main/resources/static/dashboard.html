@@ -747,6 +747,7 @@
             `).join('');
 
             // Alerts
+            document.getElementById('alerts').innerHTML = (data.alerts || []).map(a => `
                 <div class="alert alert-${a.severity.toLowerCase()}">
                     <div>
                         <strong>${a.type.replace(/_/g, ' ')}</strong>
