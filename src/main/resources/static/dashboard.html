@@ -747,11 +747,11 @@
             `).join('');
 
             // Alerts
-            document.getElementById('alerts').innerHTML = (data.alerts || []).map(a => `
                 <div class="alert alert-${a.severity.toLowerCase()}">
                     <div>
                         <strong>${a.type.replace(/_/g, ' ')}</strong>
                         <small>${a.message}</small>
+                        ${a.messageId ? `<br><small style="opacity: 0.7; font-family: monospace;">ID: ${a.messageId}</small>` : ''}
                     </div>
                     <small>${new Date(a.timestamp).toLocaleTimeString()}</small>
                 </div>

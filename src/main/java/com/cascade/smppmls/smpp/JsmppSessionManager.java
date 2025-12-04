@@ -52,6 +52,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
 
     private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
     private final com.cascade.smppmls.repository.SmsDlrRepository dlrRepository;
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     @PostConstruct
     public void init() {
@@ -175,7 +176,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                 String sourceAddress = (sessionCfg.getSourceAddress() != null) ? sessionCfg.getSourceAddress() : "";
                 SessionSender sender = new SessionSender(sessionKey, session, serviceType, sourceAddress,
                     Math.max(1, sessionCfg.getTps()), hpMaxPercentage, 
-                    outboundRepository, submitExecutor, meterRegistry);
+                    outboundRepository, submitExecutor, meterRegistry, eventPublisher);
                 
                 sessionSenders.put(sessionKey, sender);
                 ScheduledFuture<?> future = senderScheduler.scheduleAtFixedRate(

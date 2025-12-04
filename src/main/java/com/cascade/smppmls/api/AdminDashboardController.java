@@ -32,6 +32,9 @@ public class AdminDashboardController {
     
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private com.cascade.smppmls.service.AlertService alertService;
     
     // Track metrics in memory (in production, use Redis or metrics DB)
     private static final Map<String, SessionMetrics> sessionMetrics = new ConcurrentHashMap<>();
@@ -486,6 +489,18 @@ public class AdminDashboardController {
             alert.put("message", "Retry rate is " + Math.round(retryRate) + "%");
             alert.put("value", Math.round(retryRate * 100.0) / 100.0);
             alert.put("timestamp", Instant.now());
+            alerts.add(alert);
+        }
+
+        // Add delayed message alerts
+        List<com.cascade.smppmls.service.AlertService.Alert> delayedAlerts = alertService.getActiveAlerts();
+        for (com.cascade.smppmls.service.AlertService.Alert da : delayedAlerts) {
+            Map<String, Object> alert = new LinkedHashMap<>();
+            alert.put("severity", da.getType());
+            alert.put("type", "MESSAGE_DELAYED");
+            alert.put("message", da.getMessage());
+            alert.put("messageId", da.getMessageId());
+            alert.put("timestamp", da.getTimestamp());
             alerts.add(alert);
         }
         

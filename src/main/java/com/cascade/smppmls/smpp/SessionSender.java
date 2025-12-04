@@ -24,6 +24,7 @@ public class SessionSender implements Runnable {
     private final SmsOutboundRepository outboundRepository;
     private final java.util.concurrent.ExecutorService submitExecutor;
     private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     // runtime tokens - using AtomicDouble for thread safety
     private final AtomicDouble tokens;
@@ -35,7 +36,8 @@ public class SessionSender implements Runnable {
                          int tps, int hpMaxPercentage, 
                          SmsOutboundRepository outboundRepository, 
                          java.util.concurrent.ExecutorService submitExecutor, 
-                         io.micrometer.core.instrument.MeterRegistry meterRegistry) {
+                         io.micrometer.core.instrument.MeterRegistry meterRegistry,
+                         org.springframework.context.ApplicationEventPublisher eventPublisher) {
         this.sessionKey = sessionKey;
         this.session = session;
         this.serviceType = (serviceType != null) ? serviceType : "";
@@ -45,6 +47,7 @@ public class SessionSender implements Runnable {
         this.outboundRepository = outboundRepository;
         this.submitExecutor = submitExecutor;
         this.meterRegistry = meterRegistry;
+        this.eventPublisher = eventPublisher;
         this.tokens = new AtomicDouble(this.tps); // start full
         this.hpTokens = new AtomicDouble(this.hpMaxPerSecond);
         
@@ -85,7 +88,7 @@ public class SessionSender implements Runnable {
                 }
                 
                 int hpSent = 0;
-                for (SmsOutboundEntity e : page) {
+                for (SmsOutboundEntity e : page.getContent()) {
                     submitMessageAsync(e);
                     tokens.updateAndGet(current -> Math.max(0.0, current - 1.0));
                     hpTokens.updateAndGet(current -> Math.max(0.0, current - 1.0));
@@ -107,7 +110,7 @@ public class SessionSender implements Runnable {
                 }
                 
                 int npSent = 0;
-                for (SmsOutboundEntity e : page) {
+                for (SmsOutboundEntity e : page.getContent()) {
                     submitMessageAsync(e);
                     tokens.updateAndGet(current -> Math.max(0.0, current - 1.0));
                     npSent++;
@@ -177,6 +180,11 @@ public class SessionSender implements Runnable {
                         sessionKey, e.getId(), smscId, sourceInfo.getAddress(), destInfo.getAddress(), responseTime);
                     meterRegistry.counter("smpp.outbound.sent", "priority", e.getPriority(), "session", sessionKey).increment();
                     meterRegistry.timer("smpp.submit.response.time", "session", sessionKey).record(responseTime, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    
+                    // Publish event to clear any alerts
+                    if (eventPublisher != null) {
+                        eventPublisher.publishEvent(new com.cascade.smppmls.event.MessageSentEvent(this, e.getId()));
+                    }
                 }
 
             } catch (org.jsmpp.extra.NegativeResponseException nre) {

@@ -30,4 +30,7 @@ public interface SmsOutboundRepository extends JpaRepository<SmsOutboundEntity, 
 
     // find retry candidates
     org.springframework.data.domain.Page<SmsOutboundEntity> findByStatusAndNextRetryAtBefore(String status, java.time.Instant before, org.springframework.data.domain.Pageable pageable);
+
+    // find delayed messages
+    java.util.List<SmsOutboundEntity> findByStatusAndCreatedAtBeforeAndPriorityNot(String status, java.time.Instant before, String priority);
 }
