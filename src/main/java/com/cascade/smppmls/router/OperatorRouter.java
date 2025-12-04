@@ -17,6 +17,7 @@ import com.cascade.smppmls.config.SmppProperties;
 public class OperatorRouter {
 
     private final SmppProperties smppProperties;
+    private final com.cascade.smppmls.smpp.JsmppSessionManager sessionManager;
     
     // Cache for normalized prefixes to avoid regex on every call
     private final Map<String, String> prefixToOperator = new ConcurrentHashMap<>();
@@ -72,6 +73,7 @@ public class OperatorRouter {
      * Resolve operator id and a session ID for a normalized E.164 msisdn.
      * Returns String[]{operatorId, sessionId} or null if none found.
      * Uses round-robin load balancing across sessions.
+     * Only selects sessions that are currently in bound state.
      */
     public String[] resolve(String e164Msisdn) {
         if (e164Msisdn == null) return null;
@@ -86,15 +88,34 @@ public class OperatorRouter {
             if (digits.startsWith(prefix)) {
                 String operatorId = entry.getValue();
                 
-                // Get session using round-robin
-                List<String> sessions = operatorSessions.get(operatorId);
-                if (sessions != null && !sessions.isEmpty()) {
-                    AtomicInteger counter = sessionRoundRobin.get(operatorId);
-                    int index = Math.abs(counter.getAndIncrement() % sessions.size());
-                    String sessionId = sessions.get(index);
-                    
-                    return new String[] { operatorId, sessionId };
+                // Get all sessions for this operator
+                List<String> allSessions = operatorSessions.get(operatorId);
+                if (allSessions == null || allSessions.isEmpty()) {
+                    continue;
                 }
+                
+                // Filter to only bound sessions
+                Map<String, Boolean> sessionHealth = sessionManager.getSessionHealth();
+                List<String> boundSessions = new ArrayList<>();
+                for (String sessionId : allSessions) {
+                    Boolean isBound = sessionHealth.get(sessionId);
+                    if (isBound != null && isBound) {
+                        boundSessions.add(sessionId);
+                    }
+                }
+                
+                // If no bound sessions available, return null
+                if (boundSessions.isEmpty()) {
+                    log.warn("No bound sessions available for operator {} (prefix {})", operatorId, prefix);
+                    return null;
+                }
+                
+                // Use round-robin on bound sessions only
+                AtomicInteger counter = sessionRoundRobin.get(operatorId);
+                int index = Math.abs(counter.getAndIncrement() % boundSessions.size());
+                String sessionId = boundSessions.get(index);
+                
+                return new String[] { operatorId, sessionId };
             }
         }
         

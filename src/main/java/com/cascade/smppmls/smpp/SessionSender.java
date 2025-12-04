@@ -63,6 +63,12 @@ public class SessionSender implements Runnable {
     @Override
     public void run() {
         try {
+            // Check if session is bound before processing
+            if (session == null || !session.getSessionState().isBound()) {
+                log.debug("[{}] Session not bound, skipping message processing", sessionKey);
+                return;
+            }
+            
             // refill tokens atomically
             tokens.updateAndGet(current -> Math.min(current + tps, tps));
             hpTokens.updateAndGet(current -> Math.min(current + hpMaxPerSecond, hpMaxPerSecond));
