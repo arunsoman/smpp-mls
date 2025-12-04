@@ -17,12 +17,20 @@ import java.util.Scanner;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class GracefulShutdownManager {
 
     private final SmsOutboundRepository outboundRepository;
     private final JsmppSessionManager sessionManager;
     private final WebServer webServer;
+
+    public GracefulShutdownManager(
+            SmsOutboundRepository outboundRepository,
+            JsmppSessionManager sessionManager,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) WebServer webServer) {
+        this.outboundRepository = outboundRepository;
+        this.sessionManager = sessionManager;
+        this.webServer = webServer;
+    }
 
     @Value("${shutdown.max-wait-seconds:300}")
     private int maxWaitSeconds;
@@ -44,6 +52,10 @@ public class GracefulShutdownManager {
      */
     public void stopAcceptingRequests() {
         try {
+            if (webServer == null) {
+                log.warn("WebServer not available, skipping request pause");
+                return;
+            }
             if (webServer instanceof TomcatWebServer tomcatWebServer) {
                 tomcatWebServer.getTomcat().getConnector().pause();
                 log.info("✓ Server stopped accepting new requests");
