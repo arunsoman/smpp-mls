@@ -25,6 +25,9 @@ public interface SmsOutboundRepository extends JpaRepository<SmsOutboundEntity, 
     // find by status, session and priority
     org.springframework.data.domain.Page<SmsOutboundEntity> findByStatusAndSessionIdAndPriority(String status, String sessionId, String priority, org.springframework.data.domain.Pageable pageable);
     
+    // count by status
+    long countByStatus(String status);
+
     // find retry candidates
     org.springframework.data.domain.Page<SmsOutboundEntity> findByStatusAndNextRetryAtBefore(String status, java.time.Instant before, org.springframework.data.domain.Pageable pageable);
 }

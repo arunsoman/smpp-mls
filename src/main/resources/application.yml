@@ -1,5 +1,6 @@
 server:
   port: 2222
+  shutdown: graceful
 
 management:
   endpoints:
@@ -126,3 +127,10 @@ spring:
         format_sql: true
         jdbc:
           time_zone: UTC
+  lifecycle:
+    timeout-per-shutdown-phase: 60s
+
+# Graceful Shutdown Configuration
+shutdown:
+  max-wait-seconds: 300  # Maximum time to wait for message completion (5 minutes)
+  interactive: true      # Set to false for non-interactive environments (Docker)
