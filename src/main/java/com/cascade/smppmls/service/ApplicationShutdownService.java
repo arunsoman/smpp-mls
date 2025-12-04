@@ -1,6 +1,7 @@
 package com.cascade.smppmls.service;
 
 import com.cascade.smppmls.smpp.JsmppSessionManager;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -30,17 +31,25 @@ public class ApplicationShutdownService {
         this.h2DatabaseDumpService = h2DatabaseDumpService;
         this.shutdownManager = shutdownManager;
         this.sessionManager = sessionManager;
+    }
+    
+    @PostConstruct
+    public void init() {
+        log.info("ApplicationShutdownService initialized");
         
         // Register JVM shutdown hook as backup (in case @PreDestroy doesn't run)
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            if (!shutdownInProgress) {
-                log.warn("JVM shutdown hook triggered - @PreDestroy may not have run!");
-                log.warn("Attempting graceful shutdown via shutdown hook...");
-                performShutdown();
-            }
-        }, "graceful-shutdown-hook"));
-        
-        log.info("ApplicationShutdownService initialized with shutdown hook registered");
+        try {
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                if (!shutdownInProgress) {
+                    System.err.println("[WARN] JVM shutdown hook triggered - @PreDestroy may not have run!");
+                    System.err.println("[WARN] Attempting graceful shutdown via shutdown hook...");
+                    performShutdown();
+                }
+            }, "graceful-shutdown-hook"));
+            log.info("Shutdown hook registered successfully");
+        } catch (Exception e) {
+            log.warn("Failed to register shutdown hook: {}", e.getMessage());
+        }
     }
 
     @PreDestroy
