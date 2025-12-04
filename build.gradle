@@ -62,3 +62,16 @@ test {
 bootJar {
     archiveFileName = "${project.name}-${project.version}.jar"
 }
+
+// Configure bootRun to properly handle shutdown signals
+bootRun {
+    // Run in a separate JVM to allow proper signal handling
+    // This ensures Ctrl+C and kill signals are properly propagated to Spring Boot
+    systemProperty 'spring.profiles.active', System.getProperty('spring.profiles.active', 'default')
+    
+    // Enable graceful shutdown
+    systemProperty 'server.shutdown', 'graceful'
+    
+    // Increase JVM memory if needed
+    jvmArgs = ['-Xmx512m', '-Xms256m']
+}
