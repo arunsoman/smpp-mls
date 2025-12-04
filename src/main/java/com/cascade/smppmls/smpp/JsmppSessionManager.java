@@ -9,6 +9,8 @@ import org.jsmpp.bean.*;
 import org.jsmpp.extra.ProcessRequestException;
 import org.jsmpp.session.*;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
 import com.cascade.smppmls.config.SmppProperties;
@@ -27,6 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 @Slf4j
 @Component
+@Primary
 @RequiredArgsConstructor
 public class JsmppSessionManager implements SmppSessionManager, MessageReceiverListener {
 
