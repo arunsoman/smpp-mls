@@ -28,6 +28,7 @@ smpp:
           system-type: "SMPP"
           service-type: ""  # Empty for default
           source-address: "545"  # Default originator/sender ID
+          sessionCount: 2
       addr-ton: 1  # International
       addr-npi: 1  # ISDN
       address-range: ""
@@ -49,6 +50,7 @@ smpp:
         - system-id: "Shahy-EVD"
           password: "Root@123"
           tps: 200
+          sessionCount: 3
       system-type: "SMPP"
       prefixes: ["93-77", "93-76"]
 #
@@ -60,6 +62,7 @@ smpp:
           password: "Sh@123"
           tps: 150
           service-type: ""  # Empty for default
+          sessionCount: 4
           source-address: "Shahy"  # Default originator/sender ID
       system-type: "SMPP"
       prefixes: ["93-70", "93-71"]
@@ -73,6 +76,7 @@ smpp:
           tps: 150
           service-type: ""  # Empty for default
           source-address: "545"  # Default originator/sender ID
+          sessionCount: 2
       system-type: "SMPP"
       prefixes: [ "93-73", "93-78" ]
 
@@ -90,6 +94,7 @@ smpp:
     max-attempts: 5
     base-delay-ms: 1000
     max-delay-ms: 60000
+    eviction-hours: 2  # Messages older than this (from creation) will be evicted from retry queue
 
 # Priority config sample
 priority:

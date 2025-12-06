@@ -520,14 +520,17 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
     public void startSession(String sessionId) {
         log.info("Starting session: {}", sessionId);
         
-        // Parse sessionId to get operator and systemId
+        // Parse sessionId - handle both 'operator:systemId' and 'operator:systemId-N' formats
         String[] parts = sessionId.split(":");
         if (parts.length != 2) {
-            throw new IllegalArgumentException("Invalid sessionId format. Expected 'operator:systemId'");
+            throw new IllegalArgumentException("Invalid sessionId format. Expected 'operator:systemId' or 'operator:systemId-N'");
         }
         
         String operatorId = parts[0];
-        String systemId = parts[1];
+        String systemIdPart = parts[1];
+        
+        // Strip the -N suffix if present (e.g., 'awcc_client-1' -> 'awcc_client')
+        String systemId = systemIdPart.replaceAll("-\\d+$", "");
         
         // Find the session configuration
         SmppProperties.Operator operator = smppProperties.getOperators().get(operatorId);
@@ -538,7 +541,8 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
         SmppProperties.Session sessionCfg = operator.getSessions().stream()
             .filter(s -> s.getSystemId().equals(systemId))
             .findFirst()
-            .orElseThrow(() -> new IllegalArgumentException("Session not found: " + systemId));
+            .orElseThrow(() -> new IllegalArgumentException("Session config not found for systemId: " + systemId));
+        
         // Enable retries and set state
         sessionStates.put(sessionId, SessionState.STARTING);
         shouldRetry.put(sessionId, true);

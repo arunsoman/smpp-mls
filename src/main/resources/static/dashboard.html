@@ -335,8 +335,8 @@
             <div class="chart"><canvas id="successRateChart"></canvas></div>
         </div>
         <div class="card">
-            <h2>Retry Rate (%)</h2>
-            <div class="chart"><canvas id="retryRateChart"></canvas></div>
+            <h2>Retry Queue (per Operator)</h2>
+            <div class="chart"><canvas id="retryQueueChart"></canvas></div>
         </div>
         <div class="card">
             <h2>Submit Delay (ms)</h2>
@@ -499,37 +499,35 @@
         }
     });
 
-    // Retry Rate Chart
-    charts.retryRate = new Chart(document.getElementById('retryRateChart'), {
+    // Retry Queue Chart (per operator)
+    charts.retryQueue = new Chart(document.getElementById('retryQueueChart'), {
         type: 'bar',
         data: {
             labels: [],
             datasets: [
                 {
-                    label: 'Last 1 Hour',
+                    label: 'Pending Retries',
                     data: [],
-                    backgroundColor: '#ef4444',
-                    borderRadius: 6,
+                    backgroundColor: [
+                        '#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6',
+                        '#3b82f6', '#8b5cf6', '#ec4899'
+                    ],
+                    borderRadius: 8,
                     borderWidth: 2,
-                    borderColor: '#dc2626'
-                },
-                {
-                    label: 'Last 5 Min',
-                    data: [],
-                    backgroundColor: '#fb923c',
-                    borderRadius: 6,
-                    borderWidth: 2,
-                    borderColor: '#f97316'
+                    borderColor: '#1e293b'
                 }
             ]
         },
         options: { 
             ...chartConfig,
+            plugins: {
+                legend: { display: false }
+            },
             scales: {
                 ...chartConfig.scales,
                 y: {
                     ...chartConfig.scales.y,
-                    title: { display: true, text: 'Retry Rate (%)', color: '#94a3b8', font: { size: 11, weight: 'bold' } }
+                    title: { display: true, text: 'Messages in Retry Queue', color: '#94a3b8', font: { size: 11, weight: 'bold' } }
                 }
             }
         }
@@ -670,11 +668,17 @@
                 charts.successRate.data.datasets[1].data = operators.map(op => op.successRate5m);
                 charts.successRate.update('none');
                 
-                // Retry Rate
-                charts.retryRate.data.labels = operatorLabels;
-                charts.retryRate.data.datasets[0].data = operators.map(op => op.retryRate1h);
-                charts.retryRate.data.datasets[1].data = operators.map(op => op.retryRate5m);
-                charts.retryRate.update('none');
+                // Retry Queue (fetch separately)
+                try {
+                    const retryRes = await fetch(`${API}/retry-queue`);
+                    const retryData = await retryRes.json();
+                    const retryOps = retryData.operators || [];
+                    charts.retryQueue.data.labels = retryOps.map(op => op.operator);
+                    charts.retryQueue.data.datasets[0].data = retryOps.map(op => op.count);
+                    charts.retryQueue.update('none');
+                } catch (err) {
+                    console.error('Error fetching retry queue:', err);
+                }
                 
                 // Submit Delay
                 charts.submitDelay.data.labels = operatorLabels;
@@ -691,47 +695,78 @@
                 console.error('Error fetching operator performance:', err);
             }
 
-            // Sessions
-            document.getElementById('sessions').innerHTML = (data.sessions || []).map(s => {
-                const status = s.status || 'UNKNOWN';
-                const isStopped = status === 'STOPPED';
-                const isConnected = status === 'CONNECTED';
-                const isRetrying = status === 'RETRYING';
-                const isStarting = status === 'STARTING';
-                const isStopping = status === 'STOPPING';
-                
-                // Determine badge class
-                let badgeClass = 'inactive';
-                if (isConnected) badgeClass = 'active';
-                
-                // Determine button state
-                let buttonDisabled = isStopping || isStarting;
-                let buttonClass = isStopped ? 'btn-start' : 'btn-stop';
-                let buttonText = isStopped ? 'Start' : 'Stop';
-                
-                if (isStopping) buttonText = 'Stopping...';
-                if (isStarting) buttonText = 'Starting...';
-                
-                return `
-                <div class="session card">
-                    <div class="session-badge ${badgeClass}"></div>
-                    <div class="session-info">
-                        <div class="session-name">${s.sessionId}</div>
-                        <div class="session-metrics">
-                            <div>Status: <span class="badge badge-${isConnected ? 'success' : isRetrying ? 'warning' : isStopped ? 'danger' : 'info'}">${status}</span></div>
-                            <div>Sent: <span>${s.metrics.SENT || 0}</span></div>
-                            <div>Queued: <span>${s.metrics.QUEUED || 0}</span></div>
-                            <div>Failed: <span>${s.metrics.FAILED || 0}</span></div>
+            // Sessions - group by operator
+            const sessionsByOperator = {};
+            (data.sessions || []).forEach(s => {
+                // Parse operator from session ID (format: 'operator:systemId' or 'operator:systemId-N')
+                const op = s.operator || (s.sessionId.includes(':') ? s.sessionId.split(':')[0] : 'Unknown');
+                if (!sessionsByOperator[op]) sessionsByOperator[op] = [];
+                sessionsByOperator[op].push(s);
+            });
+            
+            let sessionsHtml = '';
+            Object.keys(sessionsByOperator).sort().forEach(operator => {
+                // Operator header
+                const sessions = sessionsByOperator[operator];
+                const connectedCount = sessions.filter(s => s.status === 'CONNECTED').length;
+                sessionsHtml += `
+                    <div style="margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <h3 style="margin: 0; font-size: 16px; color: #e2e8f0;">${operator}</h3>
+                            <span class="badge ${connectedCount === sessions.length ? 'badge-success' : connectedCount > 0 ? 'badge-warning' : 'badge-danger'}">
+                                ${connectedCount}/${sessions.length} Connected
+                            </span>
                         </div>
-                    </div>
-                    <button class="btn ${buttonClass}" 
-                            onclick="toggleSession('${s.sessionId}', ${!isStopped})"
-                            ${buttonDisabled ? 'disabled' : ''}>
-                        ${buttonText}
-                    </button>
-                </div>
                 `;
-            }).join('');
+                
+                // Sessions in this operator
+                sessions.forEach(s => {
+                    const status = s.status || 'UNKNOWN';
+                    const isStopped = status === 'STOPPED';
+                    const isConnected = status === 'CONNECTED';
+                    const isRetrying = status === 'RETRYING';
+                    const isStarting = status === 'STARTING';
+                    const isStopping = status === 'STOPPING';
+                    
+                    let badgeClass = 'inactive';
+                    if (isConnected) badgeClass = 'active';
+                    
+                    let buttonDisabled = isStopping || isStarting;
+                    let buttonClass = isStopped ? 'btn-start' : 'btn-stop';
+                    let buttonText = isStopped ? 'Start' : 'Stop';
+                    
+                    if (isStopping) buttonText = 'Stopping...';
+                    if (isStarting) buttonText = 'Starting...';
+                    
+                    // Extract session number suffix if present (e.g., '-1' from 'AWCC:awcc_client-1')
+                    const sessionParts = s.sessionId.split(':');
+                    const sessionLabel = sessionParts.length > 1 ? sessionParts[1] : s.sessionId;
+                    
+                    sessionsHtml += `
+                    <div class="session card" style="margin-bottom: 8px; padding: 16px;">
+                        <div class="session-badge ${badgeClass}"></div>
+                        <div class="session-info">
+                            <div class="session-name">${sessionLabel}</div>
+                            <div class="session-metrics">
+                                <div>Status: <span class="badge badge-${isConnected ? 'success' : isRetrying ? 'warning' : isStopped ? 'danger' : 'info'}">${status}</span></div>
+                                <div>Sent: <span>${s.metrics?.SENT || 0}</span></div>
+                                <div>Queued: <span>${s.metrics?.QUEUED || 0}</span></div>
+                                <div>Failed: <span>${s.metrics?.FAILED || 0}</span></div>
+                            </div>
+                        </div>
+                        <button class="btn ${buttonClass}" 
+                                onclick="toggleSession('${encodeURIComponent(s.sessionId)}', ${!isStopped})"
+                                ${buttonDisabled ? 'disabled' : ''}>
+                            ${buttonText}
+                        </button>
+                    </div>
+                    `;
+                });
+                
+                sessionsHtml += '</div>';
+            });
+            
+            document.getElementById('sessions').innerHTML = sessionsHtml || '<p style="color: #94a3b8;">No sessions configured</p>';
 
             // Activity
             document.getElementById('activity').innerHTML = (data.recentActivity || []).slice(0, 50).map(m => `

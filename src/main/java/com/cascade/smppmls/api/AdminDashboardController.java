@@ -29,6 +29,9 @@ public class AdminDashboardController {
     
     @Autowired
     private SmsDlrRepository dlrRepository;
+
+    @Autowired
+    private com.cascade.smppmls.repository.DelayedMessageRepository delayedMessageRepository;
     
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -176,7 +179,7 @@ public class AdminDashboardController {
             // Get session metrics
             String sql = "SELECT " +
                         "COUNT(*) as total, " +
-                        "SUM(CASE WHEN status = 'SENT' THEN 1 ELSE 0 END) as sent, " +
+                        "SUM(CASE WHEN status IN ('SENT', 'DELIVERED') THEN 1 ELSE 0 END) as sent, " +
                         "SUM(CASE WHEN status = 'QUEUED' THEN 1 ELSE 0 END) as queued, " +
                         "SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) as failed " +
                         "FROM sms_outbound WHERE session_id = ?";
@@ -506,7 +509,46 @@ public class AdminDashboardController {
         
         return ResponseEntity.ok(alerts);
     }
+
+    /**
+     * GET /api/admin/retry-queue
+     * Get per-operator retry queue counts for bar chart
+     */
+    @GetMapping("/retry-queue")
+    public ResponseEntity<Map<String, Object>> getRetryQueueStats() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        
+        // Get retry counts per operator
+        String sql = "SELECT operator, COUNT(*) as count FROM sms_outbound " +
+                     "WHERE status = 'RETRY' AND operator IS NOT NULL GROUP BY operator";
+        List<Map<String, Object>> retryByOperator = jdbcTemplate.queryForList(sql);
+        
+        // Get total retry count
+        long totalRetry = outboundRepository.countByStatus("RETRY");
+        result.put("totalRetry", totalRetry);
+        
+        // Format data for bar chart
+        List<Map<String, Object>> operators = new ArrayList<>();
+        for (Map<String, Object> row : retryByOperator) {
+            Map<String, Object> opData = new LinkedHashMap<>();
+            opData.put("operator", row.get("OPERATOR"));
+            opData.put("count", ((Number) row.get("COUNT")).longValue());
+            operators.add(opData);
+        }
+        result.put("operators", operators);
+        
+        return ResponseEntity.ok(result);
+    }
     
+    /**
+     * GET /api/admin/delayed-messages
+     * Get list of delayed messages recorded for archiving
+     */
+    @GetMapping("/delayed-messages")
+    public ResponseEntity<List<com.cascade.smppmls.entity.DelayedMessageLog>> getDelayedMessages() {
+        return ResponseEntity.ok(delayedMessageRepository.findAll());
+    }
+
     /**
      * POST /api/admin/session/{sessionId}/stop
      * Stop a specific session

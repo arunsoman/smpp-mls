@@ -33,4 +33,15 @@ public interface SmsOutboundRepository extends JpaRepository<SmsOutboundEntity, 
 
     // find delayed messages
     java.util.List<SmsOutboundEntity> findByStatusAndCreatedAtBeforeAndPriorityNot(String status, java.time.Instant before, String priority);
+
+    // find retry candidates by operator (for per-operator retry queues)
+    org.springframework.data.domain.Page<SmsOutboundEntity> findByStatusAndOperatorAndNextRetryAtBefore(
+        String status, String operator, java.time.Instant before, org.springframework.data.domain.Pageable pageable);
+
+    // get distinct operators with retry messages
+    @org.springframework.data.jpa.repository.Query("SELECT DISTINCT o.operator FROM SmsOutboundEntity o WHERE o.status = 'RETRY' AND o.operator IS NOT NULL")
+    java.util.List<String> findDistinctOperatorsWithRetry();
+
+    // count by status and operator (for per-operator retry stats)
+    long countByStatusAndOperator(String status, String operator);
 }

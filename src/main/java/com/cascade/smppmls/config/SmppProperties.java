@@ -42,4 +42,14 @@ public class SmppProperties {
         private int tps = 100;
         private int sessionCount = 1; // Number of concurrent binds with same credentials
     }
+
+    @Data
+    public static class Retry {
+        private int maxAttempts = 5;
+        private long baseDelayMs = 1000;
+        private long maxDelayMs = 60000;
+        private int evictionHours = 2; // Messages older than this will be evicted from retry queue
+    }
+
+    private Retry retry = new Retry();
 }

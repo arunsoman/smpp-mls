@@ -181,9 +181,10 @@ public class SessionSender implements Runnable {
                     meterRegistry.counter("smpp.outbound.sent", "priority", e.getPriority(), "session", sessionKey).increment();
                     meterRegistry.timer("smpp.submit.response.time", "session", sessionKey).record(responseTime, java.util.concurrent.TimeUnit.MILLISECONDS);
                     
-                    // Publish event to clear any alerts
+                    // Publish event to clear any alerts and track exit
                     if (eventPublisher != null) {
                         eventPublisher.publishEvent(new com.cascade.smppmls.event.MessageSentEvent(this, e.getId()));
+                        eventPublisher.publishEvent(new com.cascade.smppmls.event.MessageExitEvent(this, e, true, "SENT"));
                     }
                 }
 
@@ -224,6 +225,11 @@ public class SessionSender implements Runnable {
                         e.setStatus("FAILED");
                         log.error("[{}] Message id={} permanently failed with status=0x{}", 
                             sessionKey, e.getId(), Integer.toHexString(commandStatus));
+                        
+                        // Publish exit event for permanent failure
+                        if (eventPublisher != null) {
+                            eventPublisher.publishEvent(new com.cascade.smppmls.event.MessageExitEvent(this, e, false, "SMSC_REJECT: " + Integer.toHexString(commandStatus)));
+                        }
                     }
                     
                     outboundRepository.save(e);
