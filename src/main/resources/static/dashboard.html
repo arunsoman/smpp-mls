@@ -712,7 +712,13 @@
                 sessionsHtml += `
                     <div style="margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1);">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                            <h3 style="margin: 0; font-size: 16px; color: #e2e8f0;">${operator}</h3>
+                            <div style="display: flex; align-items: center; gap: 12px;">
+                                <h3 style="margin: 0; font-size: 16px; color: #e2e8f0;">${operator}</h3>
+                                <button class="btn btn-add" onclick="addSession('${operator}')" 
+                                        style="background: #10b981; padding: 4px 10px; font-size: 12px;">
+                                    + Add Session
+                                </button>
+                            </div>
                             <span class="badge ${connectedCount === sessions.length ? 'badge-success' : connectedCount > 0 ? 'badge-warning' : 'badge-danger'}">
                                 ${connectedCount}/${sessions.length} Connected
                             </span>
@@ -830,6 +836,33 @@
         } finally {
             // Remove from pending after a short delay to prevent rapid re-clicks
             setTimeout(() => pendingOperations.delete(id), 1000);
+        }
+    }
+
+    // Add new session for an operator
+    async function addSession(operatorId) {
+        // Prevent double-clicks
+        if (pendingOperations.has('add-' + operatorId)) {
+            return;
+        }
+        pendingOperations.add('add-' + operatorId);
+        
+        try {
+            const res = await fetch(`${API}/operator/${operatorId}/add-session`, { method: 'POST' });
+            const result = await res.json();
+            
+            showToast(result.success ? 'success' : 'error', 
+                result.success ? `New session ${result.sessionId} added` : result.message);
+            
+            // Refresh dashboard to show new session
+            if (result.success) {
+                update();
+            }
+        } catch (err) {
+            console.error('Add session error:', err);
+            showToast('error', 'Failed to add session: ' + err.message);
+        } finally {
+            setTimeout(() => pendingOperations.delete('add-' + operatorId), 1000);
         }
     }
 

@@ -147,4 +147,23 @@ public class OperatorRouter {
         
         return stats;
     }
+
+    /**
+     * Dynamically register a new session for load balancing.
+     * Called when a new session is added via the dashboard.
+     */
+    public void registerSession(String operatorId, String sessionId) {
+        List<String> sessions = operatorSessions.get(operatorId);
+        if (sessions == null) {
+            sessions = new ArrayList<>();
+            operatorSessions.put(operatorId, sessions);
+            sessionRoundRobin.put(operatorId, new AtomicInteger(0));
+        }
+        
+        if (!sessions.contains(sessionId)) {
+            sessions.add(sessionId);
+            log.info("Registered new session {} for operator {} (total sessions: {})", 
+                sessionId, operatorId, sessions.size());
+        }
+    }
 }

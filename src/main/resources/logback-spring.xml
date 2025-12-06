@@ -89,6 +89,12 @@
         <appender-ref ref="CONSOLE"/>
     </logger>
 
+    <!-- Logger for RetryScheduler - eviction and retry processing logs -->
+    <logger name="com.cascade.smppmls.smpp.RetryScheduler" level="INFO" additivity="false">
+        <appender-ref ref="ASYNC_FILE"/>
+        <appender-ref ref="CONSOLE"/>
+    </logger>
+
     <!-- Spring framework logs -->
     <logger name="org.springframework" level="WARN"/>
     <logger name="org.springframework.web" level="WARN"/>

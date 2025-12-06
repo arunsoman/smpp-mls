@@ -572,4 +572,68 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
     public Map<String, SessionState> getAllSessionStates() {
         return new HashMap<>(sessionStates);
     }
+
+    /**
+     * Dynamically add a new session for an operator.
+     * Uses the first session's credentials for that operator.
+     * @param operatorId the operator to add session to
+     * @return the new session key (e.g., "AWCC:awcc_client-4")
+     */
+    public String addSession(String operatorId) {
+        // Validate operator exists
+        SmppProperties.Operator operator = smppProperties.getOperators().get(operatorId);
+        if (operator == null) {
+            throw new IllegalArgumentException("Operator not found: " + operatorId);
+        }
+        
+        if (operator.getSessions() == null || operator.getSessions().isEmpty()) {
+            throw new IllegalArgumentException("Operator has no session configurations: " + operatorId);
+        }
+        
+        // Use first session config
+        SmppProperties.Session sessionCfg = operator.getSessions().get(0);
+        
+        // Determine base key
+        String baseKey;
+        if (sessionCfg.getUuId() != null && !sessionCfg.getUuId().trim().isEmpty()) {
+            baseKey = sessionCfg.getUuId();
+        } else {
+            baseKey = operatorId + ":" + sessionCfg.getSystemId();
+        }
+        
+        // Count existing sessions with same base key to determine next number
+        int maxNumber = 0;
+        for (String existingKey : sessionStates.keySet()) {
+            if (existingKey.equals(baseKey)) {
+                maxNumber = Math.max(maxNumber, 1);
+            } else if (existingKey.startsWith(baseKey + "-")) {
+                try {
+                    String suffix = existingKey.substring(baseKey.length() + 1);
+                    int num = Integer.parseInt(suffix);
+                    maxNumber = Math.max(maxNumber, num);
+                } catch (NumberFormatException e) {
+                    // Ignore non-numeric suffixes
+                }
+            }
+        }
+        
+        // Create new session key with next number
+        int nextNumber = maxNumber + 1;
+        String newSessionKey = baseKey + "-" + nextNumber;
+        
+        log.info("Adding new session: {} (operator={}, systemId={}, number={})", 
+            newSessionKey, operatorId, sessionCfg.getSystemId(), nextNumber);
+        
+        // Initialize state and start bind loop
+        sessionStates.put(newSessionKey, SessionState.STARTING);
+        shouldRetry.put(newSessionKey, true);
+        
+        String host = operator.getHost();
+        int port = operator.getPort();
+        
+        bindLoopExecutor.execute(() -> bindLoop(newSessionKey, operatorId, sessionCfg, host, port));
+        
+        log.info("New session {} spawned for operator {}", newSessionKey, operatorId);
+        return newSessionKey;
+    }
 }

@@ -38,6 +38,9 @@ public class AdminDashboardController {
 
     @Autowired
     private com.cascade.smppmls.service.AlertService alertService;
+
+    @Autowired
+    private com.cascade.smppmls.router.OperatorRouter operatorRouter;
     
     // Track metrics in memory (in production, use Redis or metrics DB)
     private static final Map<String, SessionMetrics> sessionMetrics = new ConcurrentHashMap<>();
@@ -589,6 +592,44 @@ public class AdminDashboardController {
             response.put("success", false);
             response.put("message", "Failed to start session: " + e.getMessage());
             response.put("sessionId", sessionId);
+            return ResponseEntity.status(500).body(response);
+        }
+    }
+
+    /**
+     * POST /api/admin/operator/{operatorId}/add-session
+     * Dynamically add a new session for an operator
+     */
+    @PostMapping("/operator/{operatorId}/add-session")
+    public ResponseEntity<Map<String, Object>> addSession(@PathVariable String operatorId) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        
+        try {
+            // Cast to JsmppSessionManager to access addSession method
+            if (!(sessionManager instanceof com.cascade.smppmls.smpp.JsmppSessionManager)) {
+                response.put("success", false);
+                response.put("message", "Dynamic session addition not supported for this session manager");
+                return ResponseEntity.status(400).body(response);
+            }
+            
+            com.cascade.smppmls.smpp.JsmppSessionManager jsmppManager = 
+                (com.cascade.smppmls.smpp.JsmppSessionManager) sessionManager;
+            
+            // Add session
+            String newSessionId = jsmppManager.addSession(operatorId);
+            
+            // Register with router for load balancing
+            operatorRouter.registerSession(operatorId, newSessionId);
+            
+            response.put("success", true);
+            response.put("message", "Session added successfully");
+            response.put("sessionId", newSessionId);
+            response.put("operatorId", operatorId);
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("message", "Failed to add session: " + e.getMessage());
+            response.put("operatorId", operatorId);
             return ResponseEntity.status(500).body(response);
         }
     }

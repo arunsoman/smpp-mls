@@ -28,7 +28,7 @@ smpp:
           system-type: "SMPP"
           service-type: ""  # Empty for default
           source-address: "545"  # Default originator/sender ID
-          sessionCount: 2
+          sessionCount: 1
       addr-ton: 1  # International
       addr-npi: 1  # ISDN
       address-range: ""
@@ -50,7 +50,7 @@ smpp:
         - system-id: "Shahy-EVD"
           password: "Root@123"
           tps: 200
-          sessionCount: 3
+          sessionCount: 1
       system-type: "SMPP"
       prefixes: ["93-77", "93-76"]
 #
@@ -62,7 +62,7 @@ smpp:
           password: "Sh@123"
           tps: 150
           service-type: ""  # Empty for default
-          sessionCount: 4
+          sessionCount: 1
           source-address: "Shahy"  # Default originator/sender ID
       system-type: "SMPP"
       prefixes: ["93-70", "93-71"]
@@ -76,7 +76,7 @@ smpp:
           tps: 150
           service-type: ""  # Empty for default
           source-address: "545"  # Default originator/sender ID
-          sessionCount: 2
+          sessionCount: 1
       system-type: "SMPP"
       prefixes: [ "93-73", "93-78" ]
 

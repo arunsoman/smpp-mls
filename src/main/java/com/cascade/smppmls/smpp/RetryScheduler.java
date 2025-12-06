@@ -78,24 +78,24 @@ public class RetryScheduler {
             if (e.getCreatedAt() != null && e.getCreatedAt().isBefore(evictionCutoff)) {
                 e.setStatus("FAILED");
                 outboundRepository.save(e);
-                log.info("Operator [{}]: message id={} evicted (age > {} hours) -> FAILED", 
-                    operatorId, e.getId(), evictionHours);
+                log.info("Operator [{}]: message id={} msisdn={} evicted (age > {} hours) -> FAILED", 
+                    operatorId, e.getId(), e.getMsisdn(), evictionHours);
                 evictedAge++;
             }
             // Check if max retries exceeded
             else if (e.getRetryCount() != null && e.getRetryCount() >= maxRetries) {
                 e.setStatus("FAILED");
                 outboundRepository.save(e);
-                log.info("Operator [{}]: message id={} reached max retries ({}) -> FAILED", 
-                    operatorId, e.getId(), maxRetries);
+                log.info("Operator [{}]: message id={} msisdn={} reached max retries ({}) -> FAILED", 
+                    operatorId, e.getId(), e.getMsisdn(), maxRetries);
                 failedMaxRetries++;
             } else {
                 // Re-queue for another attempt
                 e.setStatus("QUEUED");
                 e.setNextRetryAt(null);
                 outboundRepository.save(e);
-                log.debug("Operator [{}]: re-queued message id={} for retry (count={})", 
-                    operatorId, e.getId(), e.getRetryCount());
+                log.debug("Operator [{}]: re-queued message id={} msisdn={} for retry (count={})", 
+                    operatorId, e.getId(), e.getMsisdn(), e.getRetryCount());
                 requeued++;
             }
             processed++;
