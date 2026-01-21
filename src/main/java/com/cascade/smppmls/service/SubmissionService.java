@@ -24,6 +24,9 @@ public class SubmissionService {
     public SubmitResponse submit(SubmitRequest req) {
         String normalized = MsisdnUtils.normalizeToE164(req.getMsisdn(), "93");
         if (normalized == null) throw new IllegalArgumentException("Invalid msisdn");
+        if( normalized.startsWith("+9374")){
+            throw new IllegalArgumentException("et msisdn");
+        }
 
         String[] route = router.resolve(normalized);
 
@@ -36,16 +39,20 @@ public class SubmissionService {
         }
         // Idempotency: if clientMsgId provided and exists, return existing record
         if (req.getClientMsgId() != null && !req.getClientMsgId().isBlank()) {
-            SmsOutboundEntity existing = outboundRepository.findByClientMsgId(req.getClientMsgId());
-            if (existing != null) {
-                // ensure requestId exists
-                if (existing.getRequestId() == null) {
-                    existing.setRequestId(UUID.randomUUID().toString());
-                    outboundRepository.save(existing);
+            try {
+                SmsOutboundEntity existing = outboundRepository.findByClientMsgId(req.getClientMsgId());
+                if (existing != null) {
+                    // ensure requestId exists
+                    if (existing.getRequestId() == null) {
+                        existing.setRequestId(UUID.randomUUID().toString());
+                        outboundRepository.save(existing);
+                    }
+                    String existingRequestId = existing.getRequestId();
+                    String existingMessageId = existing.getSmscMsgId() != null ? existing.getSmscMsgId() : (existing.getId() != null ? String.valueOf(existing.getId()) : existingRequestId);
+                    return new SubmitResponse(existingRequestId, existingMessageId, existing.getStatus(), existing.getOperator(), existing.getSessionId());
                 }
-                String existingRequestId = existing.getRequestId();
-                String existingMessageId = existing.getSmscMsgId() != null ? existing.getSmscMsgId() : (existing.getId() != null ? String.valueOf(existing.getId()) : existingRequestId);
-                return new SubmitResponse(existingRequestId, existingMessageId, existing.getStatus(), existing.getOperator(), existing.getSessionId());
+            }catch (Exception e){
+                e.printStackTrace();
             }
         }
 
