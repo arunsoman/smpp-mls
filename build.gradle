@@ -42,6 +42,10 @@ dependencies {
     runtimeOnly 'mysql:mysql-connector-java:8.0.30'  // Specify the version here
     implementation 'com.clickhouse:clickhouse-jdbc:0.4.6:all'
 
+    // Redis
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation 'io.lettuce:lettuce-core'
+
     // Monitoring
     implementation 'io.micrometer:micrometer-registry-prometheus'
 
