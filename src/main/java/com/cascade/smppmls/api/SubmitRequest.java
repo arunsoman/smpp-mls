@@ -22,6 +22,8 @@ public class SubmitRequest {
     private String priority = "NORMAL";
 
     private String clientMsgId;
+    
+    private String sourceAddr;  // Sender ID
 
     private String encoding = "GSM7";
 
