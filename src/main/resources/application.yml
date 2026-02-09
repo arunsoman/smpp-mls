@@ -147,7 +147,7 @@ shutdown:
 
 # ClickHouse Archive Configuration
 clickhouse:
-  url: ${CLICKHOUSE_URL:jdbc:clickhouse://localhost:8123/default}
+  url: ${CLICKHOUSE_URL:jdbc:clickhouse://13.48.166.136:8123/default}
   username: ${CLICKHOUSE_USERNAME:default}
   password: ${CLICKHOUSE_PASSWORD:}
   archive:

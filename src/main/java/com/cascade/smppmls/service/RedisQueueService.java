@@ -4,7 +4,7 @@ import com.cascade.smppmls.model.QueuedMessage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.Set;
@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class RedisQueueService {
     
-    private final RedisTemplate<String, String> redisTemplate;
+    private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
     
     /**
@@ -70,14 +70,23 @@ public class RedisQueueService {
         try {
             String queueKey = "queue:" + sessionId;
             
-            // Pop minimum score (oldest message)
-            Set<String> result = redisTemplate.opsForZSet().popMin(queueKey, 1);
+            // Use Lua script for atomic ZPOPMIN compatibility (Redis < 5.0)
+            String script = "local val = redis.call('zrange', KEYS[1], 0, 0)\n" +
+                            "if val[1] then\n" +
+                            "    redis.call('zrem', KEYS[1], val[1])\n" +
+                            "    return val[1]\n" +
+                            "end\n" +
+                            "return nil";
+
+            org.springframework.data.redis.core.script.DefaultRedisScript<String> redisScript = 
+                new org.springframework.data.redis.core.script.DefaultRedisScript<>(script, String.class);
+                
+            String msgJson = redisTemplate.execute(redisScript, java.util.Collections.singletonList(queueKey));
             
-            if (result == null || result.isEmpty()) {
+            if (msgJson == null) {
                 return null;
             }
             
-            String msgJson = result.iterator().next();
             QueuedMessage message = objectMapper.readValue(msgJson, QueuedMessage.class);
             
             log.debug("Popped message {} from queue {}", message.getId(), queueKey);

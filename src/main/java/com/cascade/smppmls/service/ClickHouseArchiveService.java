@@ -69,6 +69,8 @@ public class ClickHouseArchiveService {
                     "    submit_sm_status Nullable(Int32)," +
                     "    submit_sm_error Nullable(String)," +
                     "    submit_response_time_ms Nullable(UInt32)," +
+                    "    queued_duration_ms Nullable(UInt32)," +
+                    "    error_message Nullable(String)," +
                     "    created_at DateTime64(3)," +
                     "    updated_at Nullable(DateTime64(3))," +
                     "    sent_at Nullable(DateTime64(3))," +
@@ -90,7 +92,9 @@ public class ClickHouseArchiveService {
                     "    err Nullable(String)," +
                     "    text Nullable(String)," +
                     "    received_at DateTime64(3)," +
-                    "    archived_at DateTime64(3) DEFAULT now64(3)" +
+                    "    archived_at DateTime64(3) DEFAULT now64(3)," +
+                    "    INDEX idx_outbound_id sms_outbound_id TYPE minmax GRANULARITY 1," +
+                    "    INDEX idx_smsc_msg_id smsc_msg_id TYPE bloom_filter GRANULARITY 1" +
                     ")" +
                     "ENGINE = MergeTree() " +
                     "PARTITION BY toYYYYMM(received_at) " +
@@ -151,7 +155,8 @@ public class ClickHouseArchiveService {
             "SELECT id, request_id, client_msg_id, msisdn, message, signature, " +
             "priority, operator, session_id, status, smsc_msg_id, source_addr, " +
             "retry_count, next_retry_at, last_attempt_at, submit_sm_status, " +
-            "submit_sm_error, submit_response_time_ms, created_at, updated_at, sent_at " +
+            "submit_sm_error, submit_response_time_ms, submit_response_time_ms as queued_duration_ms, " +
+            "submit_sm_error as error_message, created_at, updated_at, sent_at " +
             "FROM sms_outbound " +
             "WHERE status IN ('SENT', 'FAILED') AND created_at < ? " +
             "ORDER BY id " +
@@ -162,8 +167,9 @@ public class ClickHouseArchiveService {
             "(id, request_id, client_msg_id, msisdn, message, signature, " +
             "priority, operator, session_id, status, smsc_msg_id, source_addr, " +
             "retry_count, next_retry_at, last_attempt_at, submit_sm_status, " +
-            "submit_sm_error, submit_response_time_ms, created_at, updated_at, sent_at) " +
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            "submit_sm_error, submit_response_time_ms, queued_duration_ms, error_message, " +
+            "created_at, updated_at, sent_at) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         
         int totalArchived = 0;
         
@@ -200,9 +206,11 @@ public class ClickHouseArchiveService {
                         pstmt.setObject(16, record.get("SUBMIT_SM_STATUS"));
                         pstmt.setString(17, (String) record.get("SUBMIT_SM_ERROR"));
                         pstmt.setObject(18, record.get("SUBMIT_RESPONSE_TIME_MS"));
-                        pstmt.setObject(19, record.get("CREATED_AT"));
-                        pstmt.setObject(20, record.get("UPDATED_AT"));
-                        pstmt.setObject(21, record.get("SENT_AT"));
+                        pstmt.setObject(19, record.get("QUEUED_DURATION_MS"));
+                        pstmt.setString(20, (String) record.get("ERROR_MESSAGE"));
+                        pstmt.setObject(21, record.get("CREATED_AT"));
+                        pstmt.setObject(22, record.get("UPDATED_AT"));
+                        pstmt.setObject(23, record.get("SENT_AT"));
                         pstmt.addBatch();
                     }
                     

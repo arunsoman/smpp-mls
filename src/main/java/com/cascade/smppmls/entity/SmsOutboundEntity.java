@@ -61,6 +61,7 @@ public class SmsOutboundEntity {
     private String status;
 
     @Column(name = "retry_count")
+    @Builder.Default
     private Integer retryCount = 0;
 
     @Column(name = "next_retry_at")

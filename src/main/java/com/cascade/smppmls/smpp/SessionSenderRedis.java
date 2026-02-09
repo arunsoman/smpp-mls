@@ -13,7 +13,7 @@ import org.jsmpp.session.SMPPSession;
 
 import com.cascade.smppmls.util.SmppAddressUtil;
 import com.cascade.smppmls.util.AtomicDouble;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 /**
  * SessionSender - consumes messages from Redis queue and submits to SMPP.
@@ -29,7 +29,7 @@ public class SessionSenderRedis implements Runnable {
     private final int tps;
     private final int hpMaxPerSecond;
     private final RedisQueueService redisQueueService;
-    private final RedisTemplate<String, String> redisTemplate;
+    private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
     private final java.util.concurrent.ExecutorService submitExecutor;
     private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
@@ -45,7 +45,7 @@ public class SessionSenderRedis implements Runnable {
     public SessionSenderRedis(String sessionKey, SMPPSession session, String serviceType, String defaultSourceAddress,
                          int tps, int hpMaxPercentage, 
                          RedisQueueService redisQueueService,
-                         RedisTemplate<String, String> redisTemplate,
+                         StringRedisTemplate redisTemplate,
                          ObjectMapper objectMapper,
                          java.util.concurrent.ExecutorService submitExecutor, 
                          io.micrometer.core.instrument.MeterRegistry meterRegistry,
@@ -93,21 +93,13 @@ public class SessionSenderRedis implements Runnable {
 
             log.debug("[{}] Tick: tokens={}, hpTokens={}", sessionKey, tokens.get(), hpTokens.get());
 
-            // First send HP messages up to hpMaxPerSecond
-            int toSendHp = (int)Math.floor(hpTokens.get());
-            if (toSendHp > 0) {
-                int hpSent = processMessages("HIGH", toSendHp, true);
-                if (hpSent > 0) {
-                    log.info("[{}] Submitted {} HP messages", sessionKey, hpSent);
-                }
-            }
-
-            // Then send NP messages with remaining tokens
-            if (tokens.get() > 0) {
-                int npCount = (int)Math.floor(tokens.get());
-                int npSent = processMessages("NORMAL", npCount, false);
-                if (npSent > 0) {
-                    log.info("[{}] Submitted {} NP messages", sessionKey, npSent);
+            // Process messages (regardless of priority) as long as we have tokens
+            // We use the main token bucket as the primary limiter
+            int maxToSend = (int)Math.floor(tokens.get());
+            if (maxToSend > 0) {
+                int sentCount = processMessages(maxToSend);
+                if (sentCount > 0) {
+                    log.info("[{}] Submitted {} messages", sessionKey, sentCount);
                 }
             }
         } catch (Exception ex) {
@@ -115,7 +107,7 @@ public class SessionSenderRedis implements Runnable {
         }
     }
 
-    private int processMessages(String priority, int maxCount, boolean isHighPriority) {
+    private int processMessages(int maxCount) {
         int sent = 0;
         
         for (int i = 0; i < maxCount && tokens.get() > 0; i++) {
@@ -125,13 +117,7 @@ public class SessionSenderRedis implements Runnable {
                 break; // Queue empty
             }
             
-            // Check priority matches
-            if (!priority.equals(msg.getPriority())) {
-                // Wrong priority, skip (this shouldn't happen with separate queues)
-                log.warn("[{}] Popped message with wrong priority: expected={}, got={}", 
-                    sessionKey, priority, msg.getPriority());
-                continue;
-            }
+            boolean isHighPriority = "HIGH".equalsIgnoreCase(msg.getPriority());
             
             // Submit message async
             submitMessageAsync(msg);
@@ -143,8 +129,6 @@ public class SessionSenderRedis implements Runnable {
             }
             
             sent++;
-            
-            if (tokens.get() <= 0.0) break;
         }
         
         return sent;
@@ -196,6 +180,13 @@ public class SessionSenderRedis implements Runnable {
                     log.info("[{}] Sent message id={} smsc_msg_id={} src={} dest={} response_time={}ms queue_time={}ms", 
                         sessionKey, msg.getId(), smscMsgId, sourceInfo.getAddress(), destInfo.getAddress(), 
                         responseTime, queueDuration);
+                    
+                    // Cache SMSC Message ID -> Internal Message ID for DLRs (24h TTL)
+                    redisTemplate.opsForValue().set(
+                        "smsc:" + smscMsgId, 
+                        String.valueOf(msg.getId()), 
+                        java.time.Duration.ofHours(24)
+                    );
                     
                     // Add to ClickHouse update queue (async)
                     addToClickHouseUpdateQueue(msg.getId(), "SENT", smscMsgId, queueDuration, null);

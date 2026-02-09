@@ -11,7 +11,9 @@ import com.cascade.smppmls.entity.SmsOutboundEntity;
 import com.cascade.smppmls.entity.SmsDlrEntity;
 import com.cascade.smppmls.repository.SmsOutboundRepository;
 import com.cascade.smppmls.repository.SmsDlrRepository;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/track")
 public class MessageTrackingController {
@@ -22,22 +24,40 @@ public class MessageTrackingController {
     @Autowired
     private SmsDlrRepository dlrRepository;
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate clickHouseTemplate;
+    
+    @Autowired
+    private org.springframework.data.redis.core.StringRedisTemplate redisTemplate;
+    
+    @Autowired
+    private com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+
+    @org.springframework.beans.factory.annotation.Value("${clickhouse.archive.database:smpp_archive}")
+    private String archiveDatabase;
+
     /**
      * Track message by ID
      * GET /api/track/message/{id}
      */
     @GetMapping("/message/{id}")
     public ResponseEntity<?> trackByMessageId(@PathVariable Long id) {
+        // 1. Try H2 (Legacy/Queue)
         Optional<SmsOutboundEntity> outbound = outboundRepository.findById(id);
-        
-        if (outbound.isEmpty()) {
-            return ResponseEntity.status(404).body(Map.of(
-                "error", "Message not found",
-                "messageId", id
-            ));
+        if (outbound.isPresent()) {
+            return ResponseEntity.ok(buildMessageReport(outbound.get()));
         }
         
-        return ResponseEntity.ok(buildMessageReport(outbound.get()));
+        // 2. Try ClickHouse (Archive)
+        Map<String, Object> report = findInClickHouse("id = " + id);
+        if (report != null) {
+            return ResponseEntity.ok(report);
+        }
+        
+        return ResponseEntity.status(404).body(Map.of(
+            "error", "Message not found",
+            "messageId", id
+        ));
     }
     
     /**
@@ -46,16 +66,22 @@ public class MessageTrackingController {
      */
     @GetMapping("/request/{requestId}")
     public ResponseEntity<?> trackByRequestId(@PathVariable String requestId) {
+        // 1. Try H2
         SmsOutboundEntity outbound = outboundRepository.findByRequestId(requestId);
-        
-        if (outbound == null) {
-            return ResponseEntity.status(404).body(Map.of(
-                "error", "Message not found",
-                "requestId", requestId
-            ));
+        if (outbound != null) {
+            return ResponseEntity.ok(buildMessageReport(outbound));
         }
         
-        return ResponseEntity.ok(buildMessageReport(outbound));
+        // 2. Try ClickHouse
+        Map<String, Object> report = findInClickHouse("request_id = '" + requestId + "'");
+        if (report != null) {
+            return ResponseEntity.ok(report);
+        }
+        
+        return ResponseEntity.status(404).body(Map.of(
+            "error", "Message not found",
+            "requestId", requestId
+        ));
     }
     
     /**
@@ -64,16 +90,22 @@ public class MessageTrackingController {
      */
     @GetMapping("/smsc/{smscMsgId}")
     public ResponseEntity<?> trackBySmscMsgId(@PathVariable String smscMsgId) {
+        // 1. Try H2
         SmsOutboundEntity outbound = outboundRepository.findBySmscMsgId(smscMsgId);
-        
-        if (outbound == null) {
-            return ResponseEntity.status(404).body(Map.of(
-                "error", "Message not found",
-                "smscMsgId", smscMsgId
-            ));
+        if (outbound != null) {
+            return ResponseEntity.ok(buildMessageReport(outbound));
         }
         
-        return ResponseEntity.ok(buildMessageReport(outbound));
+        // 2. Try ClickHouse
+        Map<String, Object> report = findInClickHouse("smsc_msg_id = '" + smscMsgId + "'");
+        if (report != null) {
+            return ResponseEntity.ok(report);
+        }
+        
+        return ResponseEntity.status(404).body(Map.of(
+            "error", "Message not found",
+            "smscMsgId", smscMsgId
+        ));
     }
     
     /**
@@ -99,6 +131,17 @@ public class MessageTrackingController {
             reports.add(buildMessageReport(msg));
         }
         
+        // 2. Try ClickHouse
+        try {
+            String sql = "SELECT * FROM " + archiveDatabase + ".sms_outbound WHERE msisdn = ? ORDER BY created_at DESC LIMIT 50";
+            List<Map<String, Object>> chResults = clickHouseTemplate.queryForList(sql, normalizedMsisdn);
+            for (Map<String, Object> msg : chResults) {
+                reports.add(buildMessageReportFromClickHouse(msg));
+            }
+        } catch (Exception e) {
+            log.error("ClickHouse error searching by phone: {}", e.getMessage());
+        }
+        
         return ResponseEntity.ok(Map.of(
             "msisdn", normalizedMsisdn,
             "totalMessages", messages.size(),
@@ -112,18 +155,22 @@ public class MessageTrackingController {
      */
     @GetMapping("/client/{clientMsgId}")
     public ResponseEntity<?> trackByClientMsgId(@PathVariable String clientMsgId) {
+        // 1. Try H2
         List<SmsOutboundEntity> outboundList = outboundRepository.findByClientMsgId(clientMsgId);
-        
-        if (outboundList == null || outboundList.isEmpty()) {
-            return ResponseEntity.status(404).body(Map.of(
-                "error", "Message not found",
-                "clientMsgId", clientMsgId
-            ));
+        if (outboundList != null && !outboundList.isEmpty()) {
+            return ResponseEntity.ok(buildMessageReport(outboundList.get(0)));
         }
         
-        // Take first match (should be only one after unique constraint is applied)
-        SmsOutboundEntity outbound = outboundList.get(0);
-        return ResponseEntity.ok(buildMessageReport(outbound));
+        // 2. Try ClickHouse
+        Map<String, Object> report = findInClickHouse("client_msg_id = '" + clientMsgId + "'");
+        if (report != null) {
+            return ResponseEntity.ok(report);
+        }
+        
+        return ResponseEntity.status(404).body(Map.of(
+            "error", "Message not found",
+            "clientMsgId", clientMsgId
+        ));
     }
     
     /**
@@ -248,6 +295,76 @@ public class MessageTrackingController {
         report.put("timeline", timeline);
         
         return report;
+    }
+    
+    /**
+     * Build comprehensive message report from ClickHouse Map
+     */
+    private Map<String, Object> buildMessageReportFromClickHouse(Map<String, Object> msg) {
+        Map<String, Object> report = new LinkedHashMap<>();
+        
+        report.put("messageId", msg.get("id"));
+        report.put("requestId", msg.get("request_id"));
+        report.put("clientMsgId", msg.get("client_msg_id"));
+        report.put("msisdn", msg.get("msisdn"));
+        report.put("message", msg.get("message"));
+        report.put("priority", msg.get("priority"));
+        
+        Map<String, Object> routing = new LinkedHashMap<>();
+        routing.put("operator", msg.get("operator"));
+        routing.put("sessionId", msg.get("session_id"));
+        report.put("routing", routing);
+        
+        Map<String, Object> status = new LinkedHashMap<>();
+        status.put("currentStatus", msg.get("status"));
+        status.put("receivedAt", msg.get("created_at"));
+        status.put("lastUpdatedAt", msg.get("updated_at"));
+        report.put("status", status);
+        
+        Map<String, Object> submission = new LinkedHashMap<>();
+        submission.put("smscMessageId", msg.get("smsc_msg_id"));
+        submission.put("submittedAt", msg.get("sent_at"));
+        submission.put("submitSmStatus", msg.get("submit_sm_status"));
+        submission.put("submitSmError", msg.get("error_message"));
+        submission.put("queuedDurationMs", msg.get("queued_duration_ms"));
+        report.put("submission", submission);
+        
+        // Fetch DLRs from ClickHouse
+        try {
+            String dlrSql = "SELECT * FROM " + archiveDatabase + ".sms_dlr WHERE sms_outbound_id = ? ORDER BY received_at ASC";
+            List<Map<String, Object>> dlrs = clickHouseTemplate.queryForList(dlrSql, msg.get("id"));
+            if (!dlrs.isEmpty()) {
+                List<Map<String, Object>> dlrList = new ArrayList<>();
+                for (Map<String, Object> dlr : dlrs) {
+                    Map<String, Object> dlrInfo = new LinkedHashMap<>();
+                    dlrInfo.put("dlrId", dlr.get("id"));
+                    dlrInfo.put("status", dlr.get("stat"));
+                    dlrInfo.put("receivedAt", dlr.get("received_at"));
+                    dlrList.add(dlrInfo);
+                }
+                report.put("deliveryReceipts", dlrList);
+                Map<String, Object> latestDlr = dlrList.get(dlrList.size() - 1);
+                report.put("deliveryStatus", latestDlr.get("status"));
+                report.put("deliveredAt", latestDlr.get("receivedAt"));
+            } else {
+                report.put("deliveryStatus", "PENDING");
+            }
+        } catch (Exception e) {}
+        
+        return report;
+    }
+
+    private Map<String, Object> findInClickHouse(String criteria) {
+        try {
+            String sql = "SELECT * FROM " + archiveDatabase + ".sms_outbound WHERE " + criteria + " ORDER BY created_at DESC LIMIT 1";
+            List<Map<String, Object>> results = clickHouseTemplate.queryForList(sql);
+            if (!results.isEmpty()) {
+                return buildMessageReportFromClickHouse(results.get(0));
+            }
+        } catch (Exception e) {
+            log.error("ClickHouse query error: {}", e.getMessage());
+        }
+        return null;
     }
     
     /**

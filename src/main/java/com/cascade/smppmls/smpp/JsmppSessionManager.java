@@ -16,6 +16,10 @@ import org.springframework.stereotype.Component;
 import com.cascade.smppmls.config.SmppProperties;
 import com.cascade.smppmls.entity.SmsOutboundEntity;
 import com.cascade.smppmls.repository.SmsOutboundRepository;
+import com.cascade.smppmls.service.RedisQueueService;
+import com.cascade.smppmls.model.UpdateRecord;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 
 import java.nio.charset.StandardCharsets;
@@ -26,6 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * jSMPP-based SMPP session manager.
+ * Updated to use SessionSenderRedis for high-performance Redis-based queuing.
  */
 @Slf4j
 @Component
@@ -44,7 +49,10 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
     private final ScheduledExecutorService senderScheduler = Executors.newScheduledThreadPool(8);
     private final ExecutorService submitExecutor = Executors.newVirtualThreadPerTaskExecutor();
     private final ExecutorService bindLoopExecutor = Executors.newVirtualThreadPerTaskExecutor();
-    private final Map<String, SessionSender> sessionSenders = new ConcurrentHashMap<>();
+    
+    // Changed to SessionSenderRedis
+    private final Map<String, SessionSenderRedis> sessionSenders = new ConcurrentHashMap<>();
+    
     private final Map<String, ScheduledFuture<?>> senderFutures = new ConcurrentHashMap<>();
     private final Map<String, String> sessionToKeyMap = new ConcurrentHashMap<>();
     private final Map<String, SessionState> sessionStates = new ConcurrentHashMap<>();
@@ -56,6 +64,11 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
     private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
     private final com.cascade.smppmls.repository.SmsDlrRepository dlrRepository;
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
+    
+    // New dependencies for Redis/ClickHouse flow
+    private final RedisQueueService redisQueueService;
+    private final StringRedisTemplate redisTemplate;
+    private final ObjectMapper objectMapper;
 
     @PostConstruct
     public void init() {
@@ -174,17 +187,20 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                 sessionStates.put(sessionKey, SessionState.CONNECTED);
                 backoff = Math.max(1000, smppProperties.getDefaultConfig().getReconnectDelay()); // Reset backoff
                 
-                // Create and schedule a dedicated SessionSender enforcing HP/NP token buckets
+                // Create and schedule a dedicated SessionSenderRedis enforcing HP/NP token buckets
                 String serviceType = (sessionCfg.getServiceType() != null) ? sessionCfg.getServiceType() : "";
                 String sourceAddress = (sessionCfg.getSourceAddress() != null) ? sessionCfg.getSourceAddress() : "";
-                SessionSender sender = new SessionSender(sessionKey, session, serviceType, sourceAddress,
+                
+                // Using SessionSenderRedis here
+                SessionSenderRedis sender = new SessionSenderRedis(sessionKey, session, serviceType, sourceAddress,
                     Math.max(1, sessionCfg.getTps()), hpMaxPercentage, 
-                    outboundRepository, submitExecutor, meterRegistry, eventPublisher);
+                    redisQueueService, redisTemplate, objectMapper,
+                    submitExecutor, meterRegistry, eventPublisher);
                 
                 sessionSenders.put(sessionKey, sender);
                 ScheduledFuture<?> future = senderScheduler.scheduleAtFixedRate(
                     sender,
-                    0L, 1L, TimeUnit.SECONDS);
+                    0L, 1L, TimeUnit.SECONDS); // 1s tick
                 sender.setScheduledFuture(future);
                 senderFutures.put(sessionKey, future);
                 
@@ -219,7 +235,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                 try {
                     ScheduledFuture<?> future = senderFutures.remove(sessionKey);
                     if (future != null) future.cancel(true);
-                    SessionSender sender = sessionSenders.remove(sessionKey);
+                    SessionSenderRedis sender = sessionSenders.remove(sessionKey);
                     if (sender != null) sender.cancel();
                 } catch (Exception e) {
                     log.warn("[{}] Error cleaning up sender: {}", sessionDesc, e.getMessage());
@@ -255,8 +271,8 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
         String sessionKey = findSessionKeyForDeliverSm(deliverSm);
         
         if (sessionKey == null) {
-            log.warn("Received DeliverSm for unknown session");
-            throw new ProcessRequestException("Unknown session", SMPPConstant.STAT_ESME_RINVSYSID);
+            log.warn("Received DeliverSm via listener but could not determine session (possibly testing or inactive). Using UNKNOWN.");
+            sessionKey = "UNKNOWN";
         }
 
         try {
@@ -334,23 +350,58 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
     }
 
     private void processDeliveryReceipt(String sessionKey, String smscId, String rawStatus) {
-        SmsOutboundEntity outbound = outboundRepository.findBySmscMsgId(smscId);
-        if (outbound != null) {
-            String mappedStatus = mapDlrStatus(rawStatus);
-            outbound.setStatus(mappedStatus);
-            outboundRepository.save(outbound);
-
-            com.cascade.smppmls.entity.SmsDlrEntity dlrEntity = new com.cascade.smppmls.entity.SmsDlrEntity();
-            dlrEntity.setSmsOutboundId(outbound.getId());
-            dlrEntity.setSmscMsgId(smscId);
-            dlrEntity.setStatus(rawStatus);
-            dlrEntity.setReceivedAt(java.time.Instant.now());
-            dlrRepository.save(dlrEntity);
-            
-            log.info("[" + sessionKey + "] Mapped DLR for outbound id={} smsc_msg_id={} mapped={}", 
-                outbound.getId(), smscId, mappedStatus);
-        } else {
-            log.warn("[" + sessionKey + "] Could not find outbound for smsc_msg_id={}", smscId);
+        String mappedStatus = mapDlrStatus(rawStatus);
+        
+        // 1. Try Redis lookup first (Fast / New Architecture)
+        String cachedId = redisTemplate.opsForValue().get("smsc:" + smscId);
+        
+        if (cachedId != null) {
+            try {
+                Long messageId = Long.parseLong(cachedId);
+                
+                UpdateRecord update = UpdateRecord.builder()
+                    .id(messageId)
+                    .status(mappedStatus)
+                    .smscMsgId(smscId)
+                    .updatedAt(System.currentTimeMillis())
+                    .build();
+                
+                String updateJson = objectMapper.writeValueAsString(update);
+                redisTemplate.opsForSet().add("pending:clickhouse:updates", updateJson);
+                
+                log.info("[{}] DLR processed (Redis/CH): id={} smsc_id={} status={}", 
+                    sessionKey, messageId, smscId, mappedStatus);
+                
+                // Allow cleanup of cache key? Or let TTL expire?
+                // Letting TTL expire is safer against duplicate DLRs or race conditions.
+                return;
+                
+            } catch (Exception e) {
+                log.error("[{}] Error processing DLR via Redis: {}", sessionKey, e.getMessage(), e);
+            }
+        }
+        
+        // 2. Fallback to H2/Repo (Legacy / Backup)
+        try {
+            SmsOutboundEntity outbound = outboundRepository.findBySmscMsgId(smscId);
+            if (outbound != null) {
+                outbound.setStatus(mappedStatus);
+                outboundRepository.save(outbound);
+    
+                com.cascade.smppmls.entity.SmsDlrEntity dlrEntity = new com.cascade.smppmls.entity.SmsDlrEntity();
+                dlrEntity.setSmsOutboundId(outbound.getId());
+                dlrEntity.setSmscMsgId(smscId);
+                dlrEntity.setStatus(rawStatus);
+                dlrEntity.setReceivedAt(java.time.Instant.now());
+                dlrRepository.save(dlrEntity);
+                
+                log.info("[{}] Mapped DLR for outbound (H2) id={} smsc_msg_id={} mapped={}", 
+                    sessionKey, outbound.getId(), smscId, mappedStatus);
+            } else {
+                log.warn("[{}] Could not find outbound for smsc_msg_id={} in Redis or H2", sessionKey, smscId);
+            }
+        } catch (Exception e) {
+             log.error("[{}] Error processing DLR via H2: {}", sessionKey, e.getMessage(), e);
         }
     }
 
@@ -360,6 +411,9 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
         if (upperText.contains("DELIVRD")) return "DELIVERED";
         if (upperText.contains("EXPIRED")) return "EXPIRED";
         if (upperText.contains("UNDELIV")) return "UNDELIVERABLE";
+        // Simple mapping for demonstration
+        if (upperText.contains("REJECTD")) return "REJECTED";
+        if (upperText.contains("ACCEPTD")) return "ACCEPTED";
         return "DLR_" + (text.length() > 20 ? text.substring(0, 20) : text);
     }
 
@@ -491,7 +545,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
         }
         
         // Remove sender
-        SessionSender sender = sessionSenders.remove(sessionId);
+        SessionSenderRedis sender = sessionSenders.remove(sessionId);
         if (sender != null) {
             sender.cancel();
         }

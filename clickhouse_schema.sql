@@ -68,10 +68,9 @@ ENGINE = SummingMergeTree()
 ORDER BY (date, operator, status)
 AS SELECT
     toDate(created_at) as date,
-    operator,
+    ifNull(operator, 'UNKNOWN') as operator,
     status,
     count() as count,
     avg(queued_duration_ms) as avg_queue_duration
 FROM smpp_archive.sms_outbound
-WHERE operator IS NOT NULL
 GROUP BY date, operator, status;
