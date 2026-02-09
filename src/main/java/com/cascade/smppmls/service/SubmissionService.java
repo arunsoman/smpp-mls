@@ -38,22 +38,35 @@ public class SubmissionService {
             sessionId = route[1];
         }
         // Idempotency: if clientMsgId provided and exists, return existing record
+        // SYNCHRONIZED to prevent race condition with concurrent requests
         if (req.getClientMsgId() != null && !req.getClientMsgId().isBlank()) {
-            try {
-                java.util.List<SmsOutboundEntity> existingList = outboundRepository.findByClientMsgId(req.getClientMsgId());
-                if (existingList != null && !existingList.isEmpty()) {
-                    SmsOutboundEntity existing = existingList.get(0);
-                    // ensure requestId exists
-                    if (existing.getRequestId() == null) {
-                        existing.setRequestId(UUID.randomUUID().toString());
-                        outboundRepository.save(existing);
+            // Use intern() to get canonical string for synchronization
+            String lockKey = req.getClientMsgId().intern();
+            synchronized (lockKey) {
+                try {
+                    java.util.List<SmsOutboundEntity> existingList = outboundRepository.findByClientMsgId(req.getClientMsgId());
+                    if (existingList != null && !existingList.isEmpty()) {
+                        SmsOutboundEntity existing = existingList.get(0);
+                        
+                        // Log warning if duplicates exist (should not happen after unique constraint)
+                        if (existingList.size() > 1) {
+                            log.warn("Found {} duplicate entries for clientMsgId={}, using first one (id={})", 
+                                existingList.size(), req.getClientMsgId(), existing.getId());
+                        }
+                        
+                        // ensure requestId exists
+                        if (existing.getRequestId() == null) {
+                            existing.setRequestId(UUID.randomUUID().toString());
+                            outboundRepository.save(existing);
+                        }
+                        String existingRequestId = existing.getRequestId();
+                        String existingMessageId = existing.getSmscMsgId() != null ? existing.getSmscMsgId() : (existing.getId() != null ? String.valueOf(existing.getId()) : existingRequestId);
+                        return new SubmitResponse(existingRequestId, existingMessageId, existing.getStatus(), existing.getOperator(), existing.getSessionId());
                     }
-                    String existingRequestId = existing.getRequestId();
-                    String existingMessageId = existing.getSmscMsgId() != null ? existing.getSmscMsgId() : (existing.getId() != null ? String.valueOf(existing.getId()) : existingRequestId);
-                    return new SubmitResponse(existingRequestId, existingMessageId, existing.getStatus(), existing.getOperator(), existing.getSessionId());
+                } catch (Exception e) {
+                    log.error("Error checking idempotency for clientMsgId={}: {}", req.getClientMsgId(), e.getMessage());
+                    e.printStackTrace();
                 }
-            }catch (Exception e){
-                e.printStackTrace();
             }
         }
 
