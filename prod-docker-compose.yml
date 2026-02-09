@@ -1,63 +1,101 @@
 version: '3.8'
 
 services:
-  # ClickHouse Database
+  # ClickHouse Database for Message Archival
   shahy-clickhouse:
     image: clickhouse/clickhouse-server:latest
     container_name: shahy-clickhouse
+    restart: unless-stopped
+    
     ports:
       - "8123:8123"  # HTTP interface
       - "9000:9000"  # Native interface
+    
     environment:
       CLICKHOUSE_DB: smpp_archive
       CLICKHOUSE_USER: default
       CLICKHOUSE_PASSWORD: ""
+    
     volumes:
       - clickhouse-data:/var/lib/clickhouse
+    
     networks:
-      - smpp-network
+      - smpp
+    
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+    
     healthcheck:
       test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
 
   # SMPP MLS Application
   smpp-mls:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: cascade/smpp-mls
+    pull_policy: never
     container_name: smpp-mls
-    ports:
-      - "2222:2222"  # Application port
+    restart: unless-stopped
+    
     environment:
+      - ACTIVE_PROFILE=prod,hikari,monitoring
+      - JAVA_TOOL_OPTIONS=-XX:+ExitOnOutOfMemoryError -Dspring.lifecycle.timeout-per-shutdown-phase=30s
       # ClickHouse Configuration
-      CLICKHOUSE_URL: jdbc:clickhouse://shahy-clickhouse:8123/default
-      CLICKHOUSE_USERNAME: default
-      CLICKHOUSE_PASSWORD: ""
-      CLICKHOUSE_ARCHIVE_ENABLED: "true"
-      CLICKHOUSE_ARCHIVE_AGE_MINUTES: "5"
-      CLICKHOUSE_ARCHIVE_SCHEDULE_CRON: "0 */5 * * * ?"
-      CLICKHOUSE_ARCHIVE_DATABASE: smpp_archive
-      
-      # H2 Database (in-memory)
-      SPRING_DATASOURCE_URL: jdbc:h2:mem:smppdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
-      SPRING_DATASOURCE_USERNAME: sa
-      SPRING_DATASOURCE_PASSWORD: password
-      
-      # JVM Options
-      JAVA_OPTS: "-Xmx512m -Xms256m"
+      - CLICKHOUSE_URL=jdbc:clickhouse://shahy-clickhouse:8123/default
+      - CLICKHOUSE_USERNAME=default
+      - CLICKHOUSE_PASSWORD=
+      - CLICKHOUSE_ARCHIVE_ENABLED=true
+      - CLICKHOUSE_ARCHIVE_AGE_MINUTES=5
+      - CLICKHOUSE_ARCHIVE_SCHEDULE_CRON=0 */5 * * * ?
+      - CLICKHOUSE_ARCHIVE_DATABASE=smpp_archive
+    
+    ports:
+      - "2222:2222"
+    
+    volumes:
+      - /home/ubuntu/glowroot-master/smpp-mls/glowroot:/usr/local/glowroot:rw
+      - /var/log/mls-app/smpp-mls:/app/external-logs
+      - /var/log/mls-trace/smpp-mls:/app/access-logs
+      - /home/ubuntu/lctr:/lctr
+    
+    networks:
+      - smpp
+    
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '1.0'
+        reservations:
+          memory: 2G
+          cpus: '2.0'
+    
+    stop_grace_period: 30s
+    
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 2222 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
     depends_on:
       shahy-clickhouse:
         condition: service_healthy
-    networks:
-      - smpp-network
-    restart: unless-stopped
 
 volumes:
   clickhouse-data:
     driver: local
 
 networks:
-  smpp-network:
+  smpp:
+    name: smpp
     driver: bridge
