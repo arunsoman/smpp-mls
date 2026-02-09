@@ -112,15 +112,17 @@ public class MessageTrackingController {
      */
     @GetMapping("/client/{clientMsgId}")
     public ResponseEntity<?> trackByClientMsgId(@PathVariable String clientMsgId) {
-        SmsOutboundEntity outbound = outboundRepository.findByClientMsgId(clientMsgId);
+        List<SmsOutboundEntity> outboundList = outboundRepository.findByClientMsgId(clientMsgId);
         
-        if (outbound == null) {
+        if (outboundList == null || outboundList.isEmpty()) {
             return ResponseEntity.status(404).body(Map.of(
                 "error", "Message not found",
                 "clientMsgId", clientMsgId
             ));
         }
         
+        // Take first match (should be only one after unique constraint is applied)
+        SmsOutboundEntity outbound = outboundList.get(0);
         return ResponseEntity.ok(buildMessageReport(outbound));
     }
     

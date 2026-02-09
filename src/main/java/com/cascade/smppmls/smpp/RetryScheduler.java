@@ -25,6 +25,11 @@ import com.cascade.smppmls.repository.SmsOutboundRepository;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+    name = "smpp.retry.enabled", 
+    havingValue = "true", 
+    matchIfMissing = false
+)
 public class RetryScheduler {
 
     private final SmsOutboundRepository outboundRepository;

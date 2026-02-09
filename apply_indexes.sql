@@ -1,3 +1,7 @@
+-- Manual index creation script for H2 database
+-- Run this via H2 console at http://localhost:2222/h2-console
+-- Or execute via JdbcTemplate on application startup
+
 -- Performance indexes for sms_outbound table
 -- These indexes dramatically improve query performance for high-volume operations
 
@@ -28,3 +32,6 @@ CREATE INDEX IF NOT EXISTS idx_operator_status ON sms_outbound(operator, status)
 -- Composite index for archival/cleanup queries (used by ClickHouse archive service)
 CREATE INDEX IF NOT EXISTS idx_status_created ON sms_outbound(status, created_at);
 
+-- Add unique constraint for client_msg_id (idempotency enforcement)
+-- Note: This will fail if duplicate client_msg_id values exist. Clean up duplicates first if needed.
+ALTER TABLE sms_outbound ADD CONSTRAINT IF NOT EXISTS uk_client_msg_id UNIQUE (client_msg_id);

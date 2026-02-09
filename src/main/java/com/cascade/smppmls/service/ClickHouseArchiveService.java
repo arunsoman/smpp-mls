@@ -24,6 +24,7 @@ import java.util.Map;
 public class ClickHouseArchiveService {
 
     private final JdbcTemplate h2JdbcTemplate;
+    private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
     
     @Value("${clickhouse.url}")
     private String clickhouseUrl;
@@ -120,6 +121,21 @@ public class ClickHouseArchiveService {
             long duration = System.currentTimeMillis() - startTime;
             log.info("Archive completed: {} sms_outbound, {} sms_dlr archived in {}ms", 
                 archivedOutbound, archivedDlr, duration);
+            
+            // Track metrics
+            meterRegistry.counter("clickhouse.archived", "table", "sms_outbound").increment(archivedOutbound);
+            meterRegistry.counter("clickhouse.archived", "table", "sms_dlr").increment(archivedDlr);
+            meterRegistry.timer("clickhouse.archive.duration").record(duration, java.util.concurrent.TimeUnit.MILLISECONDS);
+            
+            // Track H2 table size
+            try {
+                Long tableSize = h2JdbcTemplate.queryForObject("SELECT COUNT(*) FROM sms_outbound", Long.class);
+                if (tableSize != null) {
+                    meterRegistry.gauge("h2.table.size", java.util.Collections.singletonList(io.micrometer.core.instrument.Tag.of("table", "sms_outbound")), tableSize);
+                }
+            } catch (Exception e) {
+                log.warn("Failed to track H2 table size metric: {}", e.getMessage());
+            }
         } catch (Exception e) {
             log.error("Archive job failed: {}", e.getMessage(), e);
         }
@@ -130,13 +146,14 @@ public class ClickHouseArchiveService {
         
         // Read from H2 in batches (no locks - read uncommitted via separate connection or just simple select)
         // H2's MVCC should handle readers not blocking writers.
+        // Only archive terminal states (SENT, FAILED) - not QUEUED messages still being processed
         String selectSql = 
             "SELECT id, request_id, client_msg_id, msisdn, message, signature, " +
             "priority, operator, session_id, status, smsc_msg_id, source_addr, " +
             "retry_count, next_retry_at, last_attempt_at, submit_sm_status, " +
             "submit_sm_error, submit_response_time_ms, created_at, updated_at, sent_at " +
             "FROM sms_outbound " +
-            "WHERE created_at < ? " +
+            "WHERE status IN ('SENT', 'FAILED') AND created_at < ? " +
             "ORDER BY id " +
             "LIMIT 10000";
         

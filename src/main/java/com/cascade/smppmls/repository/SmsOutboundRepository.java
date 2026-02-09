@@ -8,7 +8,7 @@ import com.cascade.smppmls.entity.SmsOutboundEntity;
 @Repository
 public interface SmsOutboundRepository extends JpaRepository<SmsOutboundEntity, Long> {
     // find by client_msg_id for idempotency
-    SmsOutboundEntity findByClientMsgId(String clientMsgId);
+    java.util.List<SmsOutboundEntity> findByClientMsgId(String clientMsgId);
     
     // find by request_id
     SmsOutboundEntity findByRequestId(String requestId);

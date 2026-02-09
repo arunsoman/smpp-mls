@@ -1,4 +1,4 @@
-package com.cascade.smppmls.entity;
+    package com.cascade.smppmls.entity;
 
 import java.time.Instant;
 
@@ -28,7 +28,7 @@ public class SmsOutboundEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "client_msg_id", length = 64)
+    @Column(name = "client_msg_id", length = 64, unique = true)
     private String clientMsgId;
     @Column(name = "request_id", length = 64)
     private String requestId;

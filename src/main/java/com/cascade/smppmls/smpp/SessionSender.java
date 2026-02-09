@@ -202,37 +202,21 @@ public class SessionSender implements Runnable {
                     e.setSubmitSmError(errorMsg);
                     e.setSubmitResponseTimeMs(responseTime);
                     
-                    // Check if error is retryable
-                    boolean retryable = isRetryableError(commandStatus);
-                    
-                    if (retryable) {
-                        int nextCount = (e.getRetryCount() == null ? 0 : e.getRetryCount()) + 1;
-                        e.setRetryCount(nextCount);
-                        e.setStatus("RETRY");
-                        // compute backoff
-                        long base = 1000L;
-                        long cap = 60_000L;
-                        long delay = base * (1L << Math.max(0, nextCount - 1));
-                        if (delay > cap) delay = cap;
-                        double jitter = 0.1 * delay;
-                        long jittered = delay - (long)jitter + (long)(Math.random() * (2 * jitter));
-                        e.setNextRetryAt(java.time.Instant.now().plusMillis(Math.max(0, jittered)));
-                        e.setLastAttemptAt(java.time.Instant.now());
-                        log.info("[{}] Message id={} marked for retry (count={}, status=0x{})", 
-                            sessionKey, e.getId(), nextCount, Integer.toHexString(commandStatus));
-                    } else {
-                        // Permanent failure
-                        e.setStatus("FAILED");
-                        log.error("[{}] Message id={} permanently failed with status=0x{}", 
-                            sessionKey, e.getId(), Integer.toHexString(commandStatus));
-                        
-                        // Publish exit event for permanent failure
-                        if (eventPublisher != null) {
-                            eventPublisher.publishEvent(new com.cascade.smppmls.event.MessageExitEvent(this, e, false, "SMSC_REJECT: " + Integer.toHexString(commandStatus)));
-                        }
-                    }
+                    // Mark as FAILED immediately (retry disabled for CPU optimization)
+                    e.setStatus("FAILED");
+                    e.setLastAttemptAt(java.time.Instant.now());
                     
                     outboundRepository.save(e);
+                    
+                    log.warn("[{}] Message id={} marked FAILED (status=0x{}, retry disabled)", 
+                        sessionKey, e.getId(), Integer.toHexString(commandStatus));
+                    
+                    // Publish exit event for failure
+                    if (eventPublisher != null) {
+                        eventPublisher.publishEvent(new com.cascade.smppmls.event.MessageExitEvent(
+                            this, e, false, "SMSC_REJECT: 0x" + Integer.toHexString(commandStatus)));
+                    }
+                    
                     meterRegistry.counter("smpp.outbound.rejected", 
                         "session", sessionKey, 
                         "status", String.format("0x%08X", commandStatus)).increment();
@@ -279,36 +263,5 @@ public class SessionSender implements Runnable {
                 log.error("[{}] Unexpected submit error id={}: {}", sessionKey, e.getId(), ex.getMessage());
             }
         });
-    }
-    
-    /**
-     * Determine if an SMPP error code is retryable
-     */
-    private boolean isRetryableError(int commandStatus) {
-        // Retryable errors (temporary failures)
-        return switch (commandStatus) {
-            case 0x00000058 -> true; // ESME_RTHROTTLED - throttling error
-            case 0x00000014 -> true; // ESME_RMSGQFUL - message queue full
-            case 0x00000008 -> true; // ESME_RSYSERR - system error
-            case 0x00000400 -> true; // ESME_RSUBMITFAIL - submit failed (temporary)
-            
-            // Non-retryable errors (permanent failures)
-            case 0x00000001, // ESME_RINVMSGLEN - invalid message length
-                 0x00000002, // ESME_RINVCMDLEN - invalid command length
-                 0x00000003, // ESME_RINVCMDID - invalid command ID
-                 0x00000004, // ESME_RINVBNDSTS - invalid bind status
-                 0x0000000A, // ESME_RINVDSTADR - invalid destination address
-                 0x0000000B, // ESME_RINVDSTADDRTON - invalid dest addr TON
-                 0x0000000C, // ESME_RINVDSTADDRNPI - invalid dest addr NPI
-                 0x0000000E, // ESME_RINVSRCADR - invalid source address
-                 0x0000000F, // ESME_RINVSRCADDRTON - invalid source addr TON
-                 0x00000010, // ESME_RINVSRCADDRNPI - invalid source addr NPI
-                 0x00000011, // ESME_RINVDSTTON - invalid destination TON
-                 0x00000033, // ESME_RINVDLNAME - invalid DL name
-                 0x00000045, // ESME_RINVNUMDESTS - invalid number of destinations
-                 0x00000066 -> false; // ESME_RINVDATACODNG - invalid data coding
-            
-            default -> true; // Retry unknown errors by default
-        };
     }
 }

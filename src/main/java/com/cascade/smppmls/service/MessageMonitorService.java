@@ -17,6 +17,11 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+    name = "smpp.monitoring.delayed-messages.enabled", 
+    havingValue = "true", 
+    matchIfMissing = false
+)
 public class MessageMonitorService {
 
     private final SmsOutboundRepository outboundRepository;

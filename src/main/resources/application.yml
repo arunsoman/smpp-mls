@@ -91,15 +91,20 @@ smpp:
 #      prefixes: ["93-74", "93-75"]
 
   retry:
+    enabled: false  # Disabled - mark failures immediately instead
     max-attempts: 1
     base-delay-ms: 1000
     max-delay-ms: 60000
     eviction-hours: 2  # Messages older than this (from creation) will be evicted from retry queue
 
+  monitoring:
+    delayed-messages:
+      enabled: false  # Disabled for CPU optimization
+
 # Priority config sample
 priority:
   high:
-    max-tps-percentage: 20
+    max-tps-percentage: 80
     enabled: true
 
 # API Security
@@ -147,6 +152,6 @@ clickhouse:
   password: ""
   archive:
     enabled: true
-    age-minutes: 35
-    schedule-cron: "0 0 */3 * * ?"
+    age-minutes: 5  # Archive messages older than 5 minutes (was 35)
+    schedule-cron: "0 */5 * * * ?"  # Every 5 minutes (was every 3 hours)
     database: smpp_archive

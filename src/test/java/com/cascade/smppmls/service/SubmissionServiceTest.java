@@ -94,4 +94,40 @@ class SubmissionServiceTest {
         // Should NOT save a new entity
         verify(outboundRepository, never()).save(any(SmsOutboundEntity.class));
     }
+    @Test
+    void testSubmit_DuplicateClientMsgId_ReturnsFirst() {
+        // Arrange
+        SubmitRequest req = new SubmitRequest();
+        req.setMsisdn("0701234567");
+        req.setMessage("Test Duplicate ClientMsgId");
+        req.setClientMsgId("unique-id-123");
+        
+        when(router.resolve(anyString())).thenReturn(new String[]{"AWCC", "awcc:client"});
+        
+        // Mock existing entities (duplicates)
+        SmsOutboundEntity existing1 = new SmsOutboundEntity();
+        existing1.setId(301L);
+        existing1.setClientMsgId("unique-id-123");
+        existing1.setStatus("SENT");
+        existing1.setRequestId("req-301");
+        
+        SmsOutboundEntity existing2 = new SmsOutboundEntity();
+        existing2.setId(302L);
+        existing2.setClientMsgId("unique-id-123");
+        existing2.setStatus("QUEUED");
+        existing2.setRequestId("req-302");
+        
+        // Return list containing duplicates
+        when(outboundRepository.findByClientMsgId("unique-id-123")).thenReturn(java.util.List.of(existing1, existing2));
+
+        // Act
+        SubmitResponse resp = service.submit(req);
+
+        // Assert
+        assertNotNull(resp);
+        // Should return the first one found
+        assertEquals("301", resp.getMessageId());
+        assertEquals("SENT", resp.getStatus());
+        verify(outboundRepository, never()).save(any(SmsOutboundEntity.class));
+    }
 }

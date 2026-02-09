@@ -40,8 +40,9 @@ public class SubmissionService {
         // Idempotency: if clientMsgId provided and exists, return existing record
         if (req.getClientMsgId() != null && !req.getClientMsgId().isBlank()) {
             try {
-                SmsOutboundEntity existing = outboundRepository.findByClientMsgId(req.getClientMsgId());
-                if (existing != null) {
+                java.util.List<SmsOutboundEntity> existingList = outboundRepository.findByClientMsgId(req.getClientMsgId());
+                if (existingList != null && !existingList.isEmpty()) {
+                    SmsOutboundEntity existing = existingList.get(0);
                     // ensure requestId exists
                     if (existing.getRequestId() == null) {
                         existing.setRequestId(UUID.randomUUID().toString());
