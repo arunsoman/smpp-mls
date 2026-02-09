@@ -17,11 +17,14 @@ out/
 .DS_Store
 Thumbs.db
 
+
 # Application
 *.log
 *.pid
 application-local.yml
 application-local.properties
+dump/
+logs/
 
 # H2 Database
 *.db

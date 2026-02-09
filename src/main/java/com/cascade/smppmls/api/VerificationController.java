@@ -146,4 +146,11 @@ public class VerificationController {
         
         return result;
     }
+    @GetMapping("/inspect")
+    public List<Map<String, Object>> inspectMessages() {
+        // IDs from user report
+        String ids = "13072, 19630, 20299, 29372, 70286, 70820, 71440, 72796, 78930";
+        String sql = "SELECT id, msisdn, message, created_at, status, session_id FROM sms_outbound WHERE id IN (" + ids + ") ORDER BY id";
+        return jdbcTemplate.queryForList(sql);
+    }
 }

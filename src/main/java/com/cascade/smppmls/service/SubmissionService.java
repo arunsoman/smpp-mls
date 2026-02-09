@@ -57,12 +57,41 @@ public class SubmissionService {
         }
 
         String requestId = UUID.randomUUID().toString();
+        
+        // Content-based Idempotency
+        // Calculate SHA-256 signature of normalized MSISDN + message content
+        String signature = null;
+        try {
+            String raw = normalized + ":" + req.getMessage();
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            signature = java.util.HexFormat.of().formatHex(hash);
+            
+            // Check if signature exists
+            java.util.Optional<SmsOutboundEntity> duplicate = outboundRepository.findBySignature(signature);
+            if (duplicate.isPresent()) {
+                SmsOutboundEntity existing = duplicate.get();
+                log.info("Duplicate submission detected (signature={}). Returning existing id={}", signature, existing.getId());
+                // ensure requestId exists
+                if (existing.getRequestId() == null) {
+                    existing.setRequestId(UUID.randomUUID().toString());
+                    outboundRepository.save(existing);
+                }
+                String existingRequestId = existing.getRequestId();
+                String existingMessageId = existing.getSmscMsgId() != null ? existing.getSmscMsgId() : (existing.getId() != null ? String.valueOf(existing.getId()) : existingRequestId);
+                return new SubmitResponse(existingRequestId, existingMessageId, existing.getStatus(), existing.getOperator(), existing.getSessionId());
+            }
+        } catch (Exception e) {
+            log.warn("Error calculating signature for idempotency: {}", e.getMessage());
+            // proceed without signature if error
+        }
 
         SmsOutboundEntity entity = SmsOutboundEntity.builder()
                 .requestId(requestId)
                 .clientMsgId(req.getClientMsgId())
                 .msisdn(normalized)
                 .message(req.getMessage())
+                .signature(signature)
                 .priority(req.getPriority())
                 .operator(operator)
                 .sessionId(sessionId)

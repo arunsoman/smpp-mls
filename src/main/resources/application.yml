@@ -28,7 +28,7 @@ smpp:
           system-type: "SMPP"
           service-type: ""  # Empty for default
           source-address: "545"  # Default originator/sender ID
-          sessionCount: 1
+          sessionCount: 3
       addr-ton: 1  # International
       addr-npi: 1  # ISDN
       address-range: ""
@@ -50,7 +50,7 @@ smpp:
         - system-id: "Shahy-EVD"
           password: "Root@123"
           tps: 200
-          sessionCount: 1
+          sessionCount: 14
       system-type: "SMPP"
       prefixes: ["93-77", "93-76"]
 #
@@ -62,7 +62,7 @@ smpp:
           password: "Sh@123"
           tps: 150
           service-type: ""  # Empty for default
-          sessionCount: 1
+          sessionCount: 2
           source-address: "Shahy"  # Default originator/sender ID
       system-type: "SMPP"
       prefixes: ["93-70", "93-71"]
@@ -76,7 +76,7 @@ smpp:
           tps: 150
           service-type: ""  # Empty for default
           source-address: "545"  # Default originator/sender ID
-          sessionCount: 1
+          sessionCount: 4
       system-type: "SMPP"
       prefixes: [ "93-73", "93-78" ]
 
@@ -91,7 +91,7 @@ smpp:
 #      prefixes: ["93-74", "93-75"]
 
   retry:
-    max-attempts: 5
+    max-attempts: 1
     base-delay-ms: 1000
     max-delay-ms: 60000
     eviction-hours: 2  # Messages older than this (from creation) will be evicted from retry queue
@@ -139,3 +139,14 @@ spring:
 shutdown:
   max-wait-seconds: 300  # Maximum time to wait for message completion (5 minutes)
   interactive: false     # Set to true only for interactive console environments
+
+# ClickHouse Archive Configuration
+clickhouse:
+  url: jdbc:clickhouse://localhost:8123/default
+  username: default
+  password: ""
+  archive:
+    enabled: true
+    age-minutes: 35
+    schedule-cron: "0 0 */3 * * ?"
+    database: smpp_archive

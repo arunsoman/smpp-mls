@@ -63,7 +63,7 @@ public class RetryScheduler {
         SmppProperties.Retry retryConfig = smppProperties.getRetry();
         int maxRetries = retryConfig.getMaxAttempts();
         int evictionHours = retryConfig.getEvictionHours();
-        Instant evictionCutoff = Instant.now().minus(evictionHours, ChronoUnit.HOURS);
+        Instant evictionCutoff = Instant.now().minus(evictionHours, ChronoUnit.MINUTES);
         
         var page = outboundRepository.findByStatusAndOperatorAndNextRetryAtBefore(
             "RETRY", operatorId, Instant.now(), PageRequest.of(0, BATCH_SIZE_PER_OPERATOR));

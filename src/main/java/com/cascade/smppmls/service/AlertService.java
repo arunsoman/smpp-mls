@@ -9,10 +9,12 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.scheduling.annotation.Scheduled;
 
 @Slf4j
 @Service
@@ -20,6 +22,29 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AlertService {
 
     private final Map<Long, Alert> activeAlerts = new ConcurrentHashMap<>();
+    private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
+
+    @Scheduled(fixedRate = 300000) // Run every 5 minutes
+    public void cleanupExpiredAlerts() {
+        try {
+            Instant cutoff = Instant.now().minus(1, ChronoUnit.HOURS);
+            int initialSize = activeAlerts.size();
+            activeAlerts.entrySet().removeIf(entry -> entry.getValue().getTimestamp().isBefore(cutoff));
+            int removed = initialSize - activeAlerts.size();
+            if (removed > 0) {
+                log.info("Alert cleanup: removed {} expired alerts, {} active remaining", removed, activeAlerts.size());
+            }
+        } catch (Exception e) {
+            log.error("Error during alert cleanup", e);
+        }
+    }
+
+    @Scheduled(fixedRate = 60000) // Update every minute
+    public void updateAlertMetrics() {
+        if (meterRegistry != null) {
+            meterRegistry.gauge("smpp.alert.active.count", activeAlerts.size());
+        }
+    }
 
     @Data
     public static class Alert {

@@ -248,6 +248,9 @@ public class SessionSender implements Runnable {
                     e.setSubmitSmError(se.getMessage());
                     e.setSubmitResponseTimeMs(responseTime);
                     
+                    // Disable retry logic for timeouts/connection errors as per request
+                    // The message might have been delivered even if we timed out waiting for response
+                    /*
                     int nextCount = (e.getRetryCount() == null ? 0 : e.getRetryCount()) + 1;
                     e.setRetryCount(nextCount);
                     e.setStatus("RETRY");
@@ -264,6 +267,11 @@ public class SessionSender implements Runnable {
                     outboundRepository.save(e);
                     log.info("[{}] Marked message id={} for retry (count={}, nextRetryAt={})", sessionKey, e.getId(), e.getRetryCount(), e.getNextRetryAt());
                     meterRegistry.counter("smpp.outbound.failed", "priority", e.getPriority(), "session", sessionKey).increment();
+                    */
+                    
+                    e.setStatus("FAILED");
+                    outboundRepository.save(e);
+                    log.warn("[{}] Message id={} failed (retry disabled) error={}", sessionKey, e.getId(), se.getMessage());
                 } catch (Exception ex2) {
                     log.error("[{}] Error updating retry status for id={}: {}", sessionKey, e.getId(), ex2.getMessage());
                 }

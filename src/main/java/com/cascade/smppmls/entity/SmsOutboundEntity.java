@@ -45,6 +45,9 @@ public class SmsOutboundEntity {
     @Column(name = "message", columnDefinition = "text")
     private String message;
 
+    @Column(name = "signature", length = 64)
+    private String signature;
+
     @Column(name = "priority", length = 10)
     private String priority;
 

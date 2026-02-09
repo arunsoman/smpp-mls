@@ -36,11 +36,12 @@ public class DailyArchiverService {
     public void archiveDailyLogs() {
         log.info("Starting daily archive of delayed messages...");
         
-        List<DelayedMessageLog> logs = repository.findAll();
-        if (logs.isEmpty()) {
+        long count = repository.count();
+        if (count == 0) {
             log.info("No delayed messages to archive.");
             return;
         }
+        log.info("Found {} messages to archive", count);
 
         String dateStr = LocalDate.now().minusDays(1).format(DateTimeFormatter.ISO_DATE); // Archive for previous day
         String filename = "delayed_messages_" + dateStr + ".csv";
@@ -57,27 +58,54 @@ public class DailyArchiverService {
                 writer.write("ID,OriginalMessageID,MSISDN,EntryTime,ExitTime,DurationSeconds,Status,Reason");
                 writer.newLine();
 
-                // Write Data
-                for (DelayedMessageLog logEntry : logs) {
-                    writer.write(String.format("%d,%d,%s,%s,%s,%d,%s,%s",
-                            logEntry.getId(),
-                            logEntry.getOriginalMessageId(),
-                            logEntry.getMsisdn(),
-                            logEntry.getEntryTime(),
-                            logEntry.getExitTime(),
-                            logEntry.getDurationSeconds(),
-                            logEntry.getStatus(),
-                            escapeCsv(logEntry.getReason())
-                    ));
-                    writer.newLine();
-                }
+                // Process in batches
+                int pageSize = 1000;
+                int page = 0;
+                org.springframework.data.domain.Page<DelayedMessageLog> logsPage;
+                
+                do {
+                    logsPage = repository.findAll(org.springframework.data.domain.PageRequest.of(page, pageSize));
+                    
+                    for (DelayedMessageLog logEntry : logsPage.getContent()) {
+                        writer.write(String.format("%d,%d,%s,%s,%s,%d,%s,%s",
+                                logEntry.getId(),
+                                logEntry.getOriginalMessageId(),
+                                logEntry.getMsisdn(),
+                                logEntry.getEntryTime(),
+                                logEntry.getExitTime(),
+                                logEntry.getDurationSeconds(),
+                                logEntry.getStatus(),
+                                escapeCsv(logEntry.getReason())
+                        ));
+                        writer.newLine();
+                    }
+                    
+                    // Flush periodically
+                    writer.flush();
+                    
+                    page++;
+                    log.debug("Archived page {}/{}", page, logsPage.getTotalPages());
+                } while (logsPage.hasNext());
             }
 
-            log.info("Archived {} delayed messages to {}", logs.size(), file.getAbsolutePath());
+            log.info("Archived delayed messages to {}", file.getAbsolutePath());
 
-            // Cleanup DB
-            repository.deleteAll();
-            log.info("Deleted archived records from database.");
+            // Cleanup DB in batches to avoid long locks/transaction timeouts
+            log.info("Starting cleanup of archived records...");
+            int deletedCount = 0;
+            org.springframework.data.domain.Page<DelayedMessageLog> deletePage;
+            
+            do {
+                // Always fetch page 0 as we are deleting
+                deletePage = repository.findAll(org.springframework.data.domain.PageRequest.of(0, 1000));
+                if (deletePage.hasContent()) {
+                    repository.deleteAll(deletePage.getContent());
+                    deletedCount += deletePage.getNumberOfElements();
+                    log.debug("Deleted {} records so far", deletedCount);
+                }
+            } while (deletePage.hasNext());
+            
+            log.info("Deleted {} archived records from database.", deletedCount);
 
         } catch (IOException e) {
             log.error("Failed to archive delayed messages: {}", e.getMessage(), e);

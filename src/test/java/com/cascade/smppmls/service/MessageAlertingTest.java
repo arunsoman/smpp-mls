@@ -30,13 +30,17 @@ class MessageAlertingTest {
     @Mock
     private ApplicationEventPublisher eventPublisher;
 
+    @Mock
+    private io.micrometer.core.instrument.MeterRegistry meterRegistry;
+
     private MessageMonitorService monitorService;
     private AlertService alertService;
 
     @BeforeEach
     void setUp() {
         monitorService = new MessageMonitorService(outboundRepository, eventPublisher);
-        alertService = new AlertService();
+        // Create AlertService with mock MeterRegistry
+        alertService = new AlertService(meterRegistry);
     }
 
     @Test
