@@ -147,11 +147,11 @@ shutdown:
 
 # ClickHouse Archive Configuration
 clickhouse:
-  url: jdbc:clickhouse://localhost:8123/default
-  username: default
-  password: ""
+  url: ${CLICKHOUSE_URL:jdbc:clickhouse://localhost:8123/default}
+  username: ${CLICKHOUSE_USERNAME:default}
+  password: ${CLICKHOUSE_PASSWORD:}
   archive:
-    enabled: true
-    age-minutes: 5  # Archive messages older than 5 minutes (was 35)
-    schedule-cron: "0 */5 * * * ?"  # Every 5 minutes (was every 3 hours)
-    database: smpp_archive
+    enabled: ${CLICKHOUSE_ARCHIVE_ENABLED:true}
+    age-minutes: ${CLICKHOUSE_ARCHIVE_AGE_MINUTES:5}  # Archive messages older than 5 minutes
+    schedule-cron: ${CLICKHOUSE_ARCHIVE_SCHEDULE_CRON:0 */5 * * * ?}  # Every 5 minutes
+    database: ${CLICKHOUSE_ARCHIVE_DATABASE:smpp_archive}
