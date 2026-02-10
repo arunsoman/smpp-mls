@@ -1,6 +1,7 @@
 package com.cascade.smppmls.smpp;
 
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +30,10 @@ public class SessionSender implements Runnable {
     // runtime tokens - using AtomicDouble for thread safety
     private final AtomicDouble tokens;
     private final AtomicDouble hpTokens;
+
+    // Secondary deduplication safety net
+    private final ConcurrentHashMap<String, Long> processedSignatures = new ConcurrentHashMap<>();
+    private long lastCleanupTime = System.currentTimeMillis();
 
     private ScheduledFuture<?> future;
 
@@ -71,6 +76,14 @@ public class SessionSender implements Runnable {
                 log.debug("[{}] Session not bound, skipping message processing", sessionKey);
                 return;
             }
+
+            // Cleanup old signatures (every 60s)
+            long now = System.currentTimeMillis();
+            if (now - lastCleanupTime > 60000) {
+                long cutoff = now - (5 * 60 * 1000L); // 5 mins
+                processedSignatures.entrySet().removeIf(entry -> entry.getValue() < cutoff);
+                lastCleanupTime = now;
+            }
             
             // refill tokens atomically
             tokens.updateAndGet(current -> Math.min(current + tps, tps));
@@ -83,6 +96,18 @@ public class SessionSender implements Runnable {
                 
                 int hpSent = 0;
                 for (SmsOutboundEntity e : slice.getContent()) {
+                    // Secondary safety net: check if signature was already sent recently
+                    String signature = e.getSignature();
+                    if (signature != null) {
+                        if (processedSignatures.containsKey(signature)) {
+                            log.warn("[{}] Secondary dedup blocked id={} sig={}", sessionKey, e.getId(), signature);
+                            e.setStatus("DUPLICATE_SEND");
+                            outboundRepository.save(e);
+                            continue; // Skip sending
+                        }
+                        processedSignatures.put(signature, now);
+                    }
+
                     // CRITICAL: Mark as SENDING *before* async dispatch to prevent re-polling
                     e.setStatus("SENDING");
                     outboundRepository.save(e);
@@ -105,6 +130,18 @@ public class SessionSender implements Runnable {
                 
                 int npSent = 0;
                 for (SmsOutboundEntity e : slice.getContent()) {
+                    // Secondary safety net: check if signature was already sent recently
+                    String signature = e.getSignature();
+                    if (signature != null) {
+                        if (processedSignatures.containsKey(signature)) {
+                            log.warn("[{}] Secondary dedup blocked id={} sig={}", sessionKey, e.getId(), signature);
+                            e.setStatus("DUPLICATE_SEND");
+                            outboundRepository.save(e);
+                            continue; // Skip sending
+                        }
+                        processedSignatures.put(signature, now);
+                    }
+
                     // CRITICAL: Mark as SENDING *before* async dispatch to prevent re-polling
                     e.setStatus("SENDING");
                     outboundRepository.save(e);
