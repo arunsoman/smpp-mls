@@ -156,9 +156,18 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                 // Connect and bind
                 String systemId = sessionCfg.getSystemId();
                 String password = sessionCfg.getPassword();
-                String systemType = (sessionCfg.getSystemType() != null && !sessionCfg.getSystemType().isEmpty()) 
-                    ? sessionCfg.getSystemType() 
-                    : smppProperties.getDefaultConfig().getSystemType();
+                // Determine system type (Session level -> Operator level -> Default level)
+                String systemType = sessionCfg.getSystemType();
+                if (systemType == null || systemType.isEmpty()) {
+                    systemType = operator.getSystemType();
+                }
+                if (systemType == null || systemType.isEmpty()) {
+                    systemType = smppProperties.getDefaultConfig().getSystemType();
+                }
+                
+                log.info("[{}] Final bind parameters: systemId={}, systemType={}, bindType={}, interfaceVersion={}, TON={}, NPI={}, addressRange={}",
+                    sessionDesc, systemId, systemType, operator.getBindType(), operator.getInterfaceVersion(), 
+                    operator.getAddrTon(), operator.getAddrNpi(), operator.getAddressRange());
                 
                 InterfaceVersion ifaceVer = parseInterfaceVersion(operator.getInterfaceVersion());
                 BindParameter bindParam;
@@ -217,7 +226,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                 }
                 
             } catch (Exception e) {
-                log.warn("[{}] Bind/connection error: {} [State: RETRYING]", sessionDesc, e.getMessage());
+                log.warn("[{}] Bind/connection error [State: RETRYING]", sessionDesc, e);
                 sessionStates.put(sessionKey, SessionState.RETRYING);
             } finally {
                 // Cleanup
