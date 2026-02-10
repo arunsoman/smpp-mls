@@ -36,6 +36,10 @@ public class SubmissionService {
     @Value("${smpp.dedup.window-minutes:5}")
     private int dedupWindowMinutes;
 
+    /** Regex to mask dynamic content (e.g. timestamps/IDs) for fuzzy dedup. Optional. */
+    @Value("${smpp.dedup.normalization-regex:}")
+    private String dedupNormalizationRegex;
+
     public SubmissionService(SmsOutboundRepository outboundRepository, OperatorRouter router) {
         this.outboundRepository = outboundRepository;
         this.router = router;
@@ -76,14 +80,26 @@ public class SubmissionService {
         }
 
         // ── Check 2: Content+Dest hash dedup (time-windowed) ──
-        String trimmedMessage = req.getMessage() != null ? req.getMessage().trim() : "";
-        String signature = calculateSignature(normalized, trimmedMessage);
+        String rawMessage = req.getMessage() != null ? req.getMessage().trim() : "";
+        String normalizedForDedup = rawMessage;
+        
+        // Apply fuzzy normalization if configured
+        if (dedupNormalizationRegex != null && !dedupNormalizationRegex.isEmpty()) {
+            try {
+                normalizedForDedup = rawMessage.replaceAll(dedupNormalizationRegex, "*");
+            } catch (Exception e) {
+                log.warn("Invalid dedup regex '{}': {}", dedupNormalizationRegex, e.getMessage());
+            }
+        }
+        
+        String signature = calculateSignature(normalized, normalizedForDedup);
         
         if (signature != null) {
-            // LOGGING TO DEBUG DUPLICATES
-            log.info("DEDUP CHECK: msisdn={} sig={} msg='{}'", 
+            // LOGGING TO DEBUG DUPLICATES (Show raw vs normalized)
+            log.info("DEDUP CHECK: msisdn={} sig={} raw='{}' norm='{}'", 
                 normalized, signature.substring(0, 8), 
-                trimmedMessage.length() > 20 ? trimmedMessage.substring(0, 20) + "..." : trimmedMessage);
+                rawMessage.length() > 50 ? rawMessage.substring(0, 50) + "..." : rawMessage,
+                normalizedForDedup.length() > 50 ? normalizedForDedup.substring(0, 50) + "..." : normalizedForDedup);
 
             Instant now = Instant.now();
             Instant firstSeen = recentSignatures.putIfAbsent(signature, now);
@@ -121,7 +137,7 @@ public class SubmissionService {
                 .requestId(requestId)
                 .clientMsgId(req.getClientMsgId())
                 .msisdn(normalized)
-                .message(trimmedMessage) // Use trimmed message
+                .message(rawMessage) // Store RAW message
                 .signature(signature)
                 .priority(req.getPriority())
                 .operator(operator)

@@ -142,4 +142,51 @@ class SubmissionServiceTest {
         assertEquals("SENT", resp.getStatus());
         verify(outboundRepository, never()).save(any(SmsOutboundEntity.class));
     }
+
+    @Test
+    void testSubmit_FuzzyDedup_BlocksDifferentContent() throws Exception {
+        // Arrange
+        // Set normalization regex to ignore numbers
+        java.lang.reflect.Field regexField = SubmissionService.class.getDeclaredField("dedupNormalizationRegex");
+        regexField.setAccessible(true);
+        regexField.set(service, "\\d+");
+
+        SubmitRequest req1 = new SubmitRequest();
+        req1.setMsisdn("0701234567");
+        req1.setMessage("Your OTP is 12345");
+        
+        SubmitRequest req2 = new SubmitRequest();
+        req2.setMsisdn("0701234567");
+        req2.setMessage("Your OTP is 67890"); // Different content!
+        
+        when(router.resolve(anyString())).thenReturn(new String[]{"AWCC", "awcc:client"});
+        
+        // Mock save for first request
+        when(outboundRepository.save(any(SmsOutboundEntity.class))).thenAnswer(invocation -> {
+            SmsOutboundEntity e = invocation.getArgument(0);
+            e.setId(500L);
+            return e;
+        });
+
+        // First submit: normalized to "Your OTP is *"
+        service.submit(req1);
+
+        // Mock lookup for second request (it hits cache, then checks DB for original)
+        SmsOutboundEntity original = new SmsOutboundEntity();
+        original.setId(500L);
+        original.setStatus("QUEUED");
+        original.setSignature("dummy-signature"); // In real life, would be same hash
+        // The service finds the signature in cache, so it blocks.
+        // It then tries to find the original record by signature.
+        // We need to mock that findBySignature call if we want a nice response.
+        when(outboundRepository.findBySignature(anyString())).thenReturn(Optional.of(original));
+
+        // Act: Second submit
+        SubmitResponse resp = service.submit(req2);
+
+        // Assert: Should be treated as duplicate even though content differs
+        assertEquals("500", resp.getMessageId());
+        // save called once for first submit only
+        verify(outboundRepository, times(1)).save(any(SmsOutboundEntity.class));
+    }
 }

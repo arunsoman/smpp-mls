@@ -8,12 +8,19 @@ management:
       exposure:
         include: health,info,prometheus
 
+
 smpp:
   default:
     system-type: "OTA"
     enquire-link-interval: 600000  # 600 seconds (10 minutes)
     reconnect-delay: 5000
     window-size: 100
+  
+  dedup:
+    window-minutes: 5
+    # Regex to mask dynamic content (e.g. timestamps/IDs) for fuzzy dedup
+    # Default: mask numbers with 8+ digits (preserves OTPs/amounts, blocks long IDs)
+    normalization-regex: "\\d{8,}"
 
   operators:
     roshan:

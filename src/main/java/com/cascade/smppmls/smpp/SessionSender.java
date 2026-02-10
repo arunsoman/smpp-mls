@@ -175,8 +175,13 @@ public class SessionSender implements Runnable {
                     e.setSmscMsgId(smscId);
                     e.setStatus("SENT");
                     outboundRepository.save(e);
-                    log.info("[{}] Sent message id={} smsc_msg_id={} src={} dest={} response_time={}ms", 
-                        sessionKey, e.getId(), smscId, sourceInfo.getAddress(), destInfo.getAddress(), responseTime);
+                    String msgContent = e.getMessage();
+                    String msgLog = (msgContent != null && msgContent.length() > 60) 
+                        ? msgContent.substring(0, 60) + "..." 
+                        : msgContent;
+                    
+                    log.info("[{}] Sent message id={} smsc_msg_id={} src={} dest={} response_time={}ms msg='{}'", 
+                        sessionKey, e.getId(), smscId, sourceInfo.getAddress(), destInfo.getAddress(), responseTime, msgLog);
                     meterRegistry.counter("smpp.outbound.sent", "priority", e.getPriority(), "session", sessionKey).increment();
                     meterRegistry.timer("smpp.submit.response.time", "session", sessionKey).record(responseTime, java.util.concurrent.TimeUnit.MILLISECONDS);
                     
