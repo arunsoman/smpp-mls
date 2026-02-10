@@ -63,7 +63,7 @@ public class SmsOutboundEntity {
     @Column(name = "session_id", length = 50)
     private String sessionId;
 
-    @Column(name = "status", length = 20)
+    @Column(name = "status", length = 100)
     private String status;
 
     @Column(name = "retry_count")
