@@ -76,8 +76,15 @@ public class SubmissionService {
         }
 
         // ── Check 2: Content+Dest hash dedup (time-windowed) ──
-        String signature = calculateSignature(normalized, req.getMessage());
+        String trimmedMessage = req.getMessage() != null ? req.getMessage().trim() : "";
+        String signature = calculateSignature(normalized, trimmedMessage);
+        
         if (signature != null) {
+            // LOGGING TO DEBUG DUPLICATES
+            log.info("DEDUP CHECK: msisdn={} sig={} msg='{}'", 
+                normalized, signature.substring(0, 8), 
+                trimmedMessage.length() > 20 ? trimmedMessage.substring(0, 20) + "..." : trimmedMessage);
+
             Instant now = Instant.now();
             Instant firstSeen = recentSignatures.putIfAbsent(signature, now);
 
@@ -114,7 +121,7 @@ public class SubmissionService {
                 .requestId(requestId)
                 .clientMsgId(req.getClientMsgId())
                 .msisdn(normalized)
-                .message(req.getMessage())
+                .message(trimmedMessage) // Use trimmed message
                 .signature(signature)
                 .priority(req.getPriority())
                 .operator(operator)
