@@ -29,7 +29,7 @@ public class SmsDlrEntity {
     @Column(name = "smsc_msg_id", length = 64)
     private String smscMsgId;
 
-    @Column(name = "status", length = 50)
+    @Column(name = "status", length = 500)
     private String status;
 
     @Column(name = "received_at")

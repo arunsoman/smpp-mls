@@ -361,7 +361,13 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
             com.cascade.smppmls.entity.SmsDlrEntity dlrEntity = new com.cascade.smppmls.entity.SmsDlrEntity();
             dlrEntity.setSmsOutboundId(outbound.getId());
             dlrEntity.setSmscMsgId(smscId);
-            dlrEntity.setStatus(rawStatus);
+            
+            // Truncate status if it's too long for the column (length 500)
+            String safeStatus = rawStatus;
+            if (safeStatus != null && safeStatus.length() > 490) {
+                safeStatus = safeStatus.substring(0, 487) + "...";
+            }
+            dlrEntity.setStatus(safeStatus);
             dlrEntity.setReceivedAt(java.time.Instant.now());
             dlrRepository.save(dlrEntity);
             
