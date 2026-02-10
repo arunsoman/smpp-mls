@@ -39,22 +39,60 @@ public class SubmissionService {
             sessionId = route[1];
         }
         // Idempotency: if clientMsgId provided and exists, return existing record
-        // SYNCHRONIZED to prevent race condition with concurrent requests
+        // Use ConcurrentHashMap-based lock striping instead of String.intern() to avoid JVM string pool growth
         if (req.getClientMsgId() != null && !req.getClientMsgId().isBlank()) {
-            // Use intern() to get canonical string for synchronization
-            String lockKey = req.getClientMsgId().intern();
-            synchronized (lockKey) {
-                try {
-                    java.util.List<SmsOutboundEntity> existingList = outboundRepository.findByClientMsgId(req.getClientMsgId());
-                    if (existingList != null && !existingList.isEmpty()) {
-                        SmsOutboundEntity existing = existingList.get(0);
-                        
-                        // Log warning if duplicates exist (should not happen after unique constraint)
-                        if (existingList.size() > 1) {
-                            log.warn("Found {} duplicate entries for clientMsgId={}, using first one (id={})", 
-                                existingList.size(), req.getClientMsgId(), existing.getId());
+            Object lock = idempotencyLocks.computeIfAbsent(req.getClientMsgId(), k -> new Object());
+            try {
+                synchronized (lock) {
+                    try {
+                        java.util.List<SmsOutboundEntity> existingList = outboundRepository.findByClientMsgId(req.getClientMsgId());
+                        if (existingList != null && !existingList.isEmpty()) {
+                            SmsOutboundEntity existing = existingList.get(0);
+                            
+                            // Log warning if duplicates exist (should not happen after unique constraint)
+                            if (existingList.size() > 1) {
+                                log.warn("Found {} duplicate entries for clientMsgId={}, using first one (id={})", 
+                                    existingList.size(), req.getClientMsgId(), existing.getId());
+                            }
+                            
+                            // ensure requestId exists
+                            if (existing.getRequestId() == null) {
+                                existing.setRequestId(UUID.randomUUID().toString());
+                                outboundRepository.save(existing);
+                            }
+                            String existingRequestId = existing.getRequestId();
+                            String existingMessageId = existing.getSmscMsgId() != null ? existing.getSmscMsgId() : (existing.getId() != null ? String.valueOf(existing.getId()) : existingRequestId);
+                            return new SubmitResponse(existingRequestId, existingMessageId, existing.getStatus(), existing.getOperator(), existing.getSessionId());
                         }
-                        
+                    } catch (Exception e) {
+                        log.error("Error checking idempotency for clientMsgId={}: {}", req.getClientMsgId(), e.getMessage());
+                    }
+                }
+            } finally {
+                idempotencyLocks.remove(req.getClientMsgId());
+            }
+        }
+
+        String requestId = UUID.randomUUID().toString();
+        
+        // Content-based Idempotency (SYNCHRONIZED to prevent race condition)
+        // Calculate SHA-256 signature of normalized MSISDN + message content
+        String signature = null;
+        try {
+            String raw = normalized + ":" + req.getMessage();
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            signature = java.util.HexFormat.of().formatHex(hash);
+            
+            // CRITICAL: Synchronize on signature to prevent concurrent duplicates
+            Object lock = idempotencyLocks.computeIfAbsent(signature, k -> new Object());
+            try {
+                synchronized (lock) {
+                    // Check if signature exists
+                    java.util.Optional<SmsOutboundEntity> duplicate = outboundRepository.findBySignature(signature);
+                    if (duplicate.isPresent()) {
+                        SmsOutboundEntity existing = duplicate.get();
+                        log.info("Duplicate submission detected (signature={}). Returning existing id={}", signature, existing.getId());
                         // ensure requestId exists
                         if (existing.getRequestId() == null) {
                             existing.setRequestId(UUID.randomUUID().toString());
@@ -64,37 +102,9 @@ public class SubmissionService {
                         String existingMessageId = existing.getSmscMsgId() != null ? existing.getSmscMsgId() : (existing.getId() != null ? String.valueOf(existing.getId()) : existingRequestId);
                         return new SubmitResponse(existingRequestId, existingMessageId, existing.getStatus(), existing.getOperator(), existing.getSessionId());
                     }
-                } catch (Exception e) {
-                    log.error("Error checking idempotency for clientMsgId={}: {}", req.getClientMsgId(), e.getMessage());
-                    e.printStackTrace();
                 }
-            }
-        }
-
-        String requestId = UUID.randomUUID().toString();
-        
-        // Content-based Idempotency
-        // Calculate SHA-256 signature of normalized MSISDN + message content
-        String signature = null;
-        try {
-            String raw = normalized + ":" + req.getMessage();
-            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            signature = java.util.HexFormat.of().formatHex(hash);
-            
-            // Check if signature exists
-            java.util.Optional<SmsOutboundEntity> duplicate = outboundRepository.findBySignature(signature);
-            if (duplicate.isPresent()) {
-                SmsOutboundEntity existing = duplicate.get();
-                log.info("Duplicate submission detected (signature={}). Returning existing id={}", signature, existing.getId());
-                // ensure requestId exists
-                if (existing.getRequestId() == null) {
-                    existing.setRequestId(UUID.randomUUID().toString());
-                    outboundRepository.save(existing);
-                }
-                String existingRequestId = existing.getRequestId();
-                String existingMessageId = existing.getSmscMsgId() != null ? existing.getSmscMsgId() : (existing.getId() != null ? String.valueOf(existing.getId()) : existingRequestId);
-                return new SubmitResponse(existingRequestId, existingMessageId, existing.getStatus(), existing.getOperator(), existing.getSessionId());
+            } finally {
+                idempotencyLocks.remove(signature);
             }
         } catch (Exception e) {
             log.warn("Error calculating signature for idempotency: {}", e.getMessage());
