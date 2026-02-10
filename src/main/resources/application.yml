@@ -137,6 +137,10 @@ spring:
         format_sql: true
         jdbc:
           time_zone: UTC
+  data:
+    redis:
+      host: ${REDIS_HOST:13.48.166.136}
+      port: ${REDIS_PORT:6379}
   lifecycle:
     timeout-per-shutdown-phase: 330s  # 300s for message wait + 30s buffer for cleanup
 
