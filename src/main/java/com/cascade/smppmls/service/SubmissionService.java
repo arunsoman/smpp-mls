@@ -20,6 +20,7 @@ public class SubmissionService {
 
     private final SmsOutboundRepository outboundRepository;
     private final OperatorRouter router;
+    private final java.util.concurrent.ConcurrentHashMap<String, Object> idempotencyLocks = new java.util.concurrent.ConcurrentHashMap<>();
 
     public SubmitResponse submit(SubmitRequest req) {
         String normalized = MsisdnUtils.normalizeToE164(req.getMsisdn(), "93");

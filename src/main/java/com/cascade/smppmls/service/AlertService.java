@@ -24,6 +24,12 @@ public class AlertService {
     private final Map<Long, Alert> activeAlerts = new ConcurrentHashMap<>();
     private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
+    @jakarta.annotation.PostConstruct
+    public void initMetrics() {
+        // Register gauge ONCE with a live reference — Micrometer will poll the lambda on each scrape
+        meterRegistry.gauge("smpp.alert.active.count", activeAlerts, Map::size);
+    }
+
     @Scheduled(fixedRate = 300000) // Run every 5 minutes
     public void cleanupExpiredAlerts() {
         try {
@@ -36,13 +42,6 @@ public class AlertService {
             }
         } catch (Exception e) {
             log.error("Error during alert cleanup", e);
-        }
-    }
-
-    @Scheduled(fixedRate = 60000) // Update every minute
-    public void updateAlertMetrics() {
-        if (meterRegistry != null) {
-            meterRegistry.gauge("smpp.alert.active.count", activeAlerts.size());
         }
     }
 

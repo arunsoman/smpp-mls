@@ -22,11 +22,11 @@ public interface SmsOutboundRepository extends JpaRepository<SmsOutboundEntity, 
     // find by signature (content hash) for idempotency
     java.util.Optional<SmsOutboundEntity> findBySignature(String signature);
     
-    // find by status and session
-    org.springframework.data.domain.Page<SmsOutboundEntity> findByStatusAndSessionId(String status, String sessionId, org.springframework.data.domain.Pageable pageable);
+    // find by status and session (Slice avoids COUNT(*) query)
+    org.springframework.data.domain.Slice<SmsOutboundEntity> findByStatusAndSessionId(String status, String sessionId, org.springframework.data.domain.Pageable pageable);
     
-    // find by status, session and priority
-    org.springframework.data.domain.Page<SmsOutboundEntity> findByStatusAndSessionIdAndPriority(String status, String sessionId, String priority, org.springframework.data.domain.Pageable pageable);
+    // find by status, session and priority (Slice avoids COUNT(*) query)
+    org.springframework.data.domain.Slice<SmsOutboundEntity> findByStatusAndSessionIdAndPriority(String status, String sessionId, String priority, org.springframework.data.domain.Pageable pageable);
     
     // count by status
     long countByStatus(String status);

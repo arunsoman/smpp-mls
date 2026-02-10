@@ -7,6 +7,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -17,7 +18,12 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 @Entity
-@Table(name = "sms_outbound")
+@Table(name = "sms_outbound", indexes = {
+    @Index(name = "idx_status_session_priority", columnList = "status, session_id, priority"),
+    @Index(name = "idx_smsc_msg_id", columnList = "smsc_msg_id"),
+    @Index(name = "idx_created_at_status", columnList = "created_at, status"),
+    @Index(name = "idx_signature", columnList = "signature")
+})
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

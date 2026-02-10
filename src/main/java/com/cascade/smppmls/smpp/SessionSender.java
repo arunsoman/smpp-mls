@@ -76,19 +76,13 @@ public class SessionSender implements Runnable {
             tokens.updateAndGet(current -> Math.min(current + tps, tps));
             hpTokens.updateAndGet(current -> Math.min(current + hpMaxPerSecond, hpMaxPerSecond));
 
-            log.debug("[{}] Tick: tokens={}, hpTokens={}", sessionKey, tokens.get(), hpTokens.get());
-
             // first send HP messages up to hpMaxPerSecond
             int toSendHp = (int)Math.floor(hpTokens.get());
             if (toSendHp > 0) {
-                var page = outboundRepository.findByStatusAndSessionIdAndPriority("QUEUED", sessionKey, "HIGH", org.springframework.data.domain.PageRequest.of(0, toSendHp));
-                long hpQueued = page.getTotalElements();
-                if (hpQueued > 0) {
-                    log.debug("[{}] HP check: toSend={}, queued={}, found={}", sessionKey, toSendHp, hpQueued, page.getContent().size());
-                }
+                var slice = outboundRepository.findByStatusAndSessionIdAndPriority("QUEUED", sessionKey, "HIGH", org.springframework.data.domain.PageRequest.of(0, toSendHp));
                 
                 int hpSent = 0;
-                for (SmsOutboundEntity e : page.getContent()) {
+                for (SmsOutboundEntity e : slice.getContent()) {
                     submitMessageAsync(e);
                     tokens.updateAndGet(current -> Math.max(0.0, current - 1.0));
                     hpTokens.updateAndGet(current -> Math.max(0.0, current - 1.0));
@@ -103,14 +97,10 @@ public class SessionSender implements Runnable {
             // then send NP messages with remaining tokens
             if (tokens.get() > 0) {
                 int npCount = (int)Math.floor(tokens.get());
-                var page = outboundRepository.findByStatusAndSessionIdAndPriority("QUEUED", sessionKey, "NORMAL", org.springframework.data.domain.PageRequest.of(0, npCount));
-                long npQueued = page.getTotalElements();
-                if (npQueued > 0) {
-                    log.debug("[{}] NP check: toSend={}, queued={}, found={}", sessionKey, npCount, npQueued, page.getContent().size());
-                }
+                var slice = outboundRepository.findByStatusAndSessionIdAndPriority("QUEUED", sessionKey, "NORMAL", org.springframework.data.domain.PageRequest.of(0, npCount));
                 
                 int npSent = 0;
-                for (SmsOutboundEntity e : page.getContent()) {
+                for (SmsOutboundEntity e : slice.getContent()) {
                     submitMessageAsync(e);
                     tokens.updateAndGet(current -> Math.max(0.0, current - 1.0));
                     npSent++;
