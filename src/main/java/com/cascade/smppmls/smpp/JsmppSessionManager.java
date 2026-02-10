@@ -160,17 +160,31 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                     ? sessionCfg.getSystemType() 
                     : smppProperties.getDefaultConfig().getSystemType();
                 
-                session.connectAndBind(host, port, 
-                    new BindParameter(
-                        BindType.BIND_TX,
+                InterfaceVersion ifaceVer = parseInterfaceVersion(operator.getInterfaceVersion());
+                BindParameter bindParam;
+                if (ifaceVer != null) {
+                    bindParam = new BindParameter(
+                        parseBindType(operator.getBindType()),
                         systemId,
                         password,
                         systemType,
-                        TypeOfNumber.UNKNOWN,
-                        NumberingPlanIndicator.UNKNOWN,
-                        null
-                    )
-                );
+                        parseTon(operator.getAddrTon()),
+                        parseNpi(operator.getAddrNpi()),
+                        operator.getAddressRange(),
+                        ifaceVer
+                    );
+                } else {
+                    bindParam = new BindParameter(
+                        parseBindType(operator.getBindType()),
+                        systemId,
+                        password,
+                        systemType,
+                        parseTon(operator.getAddrTon()),
+                        parseNpi(operator.getAddrNpi()),
+                        operator.getAddressRange()
+                    );
+                }
+                session.connectAndBind(host, port, bindParam);
                 
                 log.info("[{}] Bound successfully", sessionDesc);
                 sessions.put(sessionKey, session);
@@ -574,6 +588,38 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
      */
     public Map<String, SessionState> getAllSessionStates() {
         return new HashMap<>(sessionStates);
+    }
+
+    private BindType parseBindType(String type) {
+        if (type == null) return BindType.BIND_TX;
+        try {
+            return BindType.valueOf(type.toUpperCase());
+        } catch (Exception e) {
+            log.warn("Invalid bind type {}, defaulting to BIND_TX", type);
+            return BindType.BIND_TX;
+        }
+    }
+
+    private InterfaceVersion parseInterfaceVersion(String version) {
+        if (version == null || version.isEmpty()) return null;
+        if (version.equalsIgnoreCase("0x33")) return InterfaceVersion.IF_33;
+        if (version.equalsIgnoreCase("0x34")) return InterfaceVersion.IF_34;
+        if (version.equalsIgnoreCase("0x50")) return InterfaceVersion.IF_50;
+        return InterfaceVersion.IF_34;
+    }
+
+    private TypeOfNumber parseTon(int ton) {
+        for (TypeOfNumber t : TypeOfNumber.values()) {
+            if (t.value() == (byte) ton) return t;
+        }
+        return TypeOfNumber.UNKNOWN;
+    }
+
+    private NumberingPlanIndicator parseNpi(int npi) {
+        for (NumberingPlanIndicator n : NumberingPlanIndicator.values()) {
+            if (n.value() == (byte) npi) return n;
+        }
+        return NumberingPlanIndicator.UNKNOWN;
     }
 
     /**

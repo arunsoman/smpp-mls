@@ -28,10 +28,10 @@ public class SmppProperties {
         private String host;
         private int port = 2775;
         private String bindType = "BIND_TX";
-        private String interfaceVersion = "0x34";
+        private String interfaceVersion = null; // Default to null, let manager decide
         private int addrTon = 0; // UNKNOWN
         private int addrNpi = 0; // UNKNOWN
-        private String addressRange = "";
+        private String addressRange = null; // Default to null
         private List<Session> sessions;
         private List<String> prefixes;
     }
