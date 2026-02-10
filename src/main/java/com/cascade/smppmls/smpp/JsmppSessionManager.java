@@ -554,10 +554,9 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
         // Start the bind loop for this session using virtual thread
         final String finalOperatorId = operatorId;
         final SmppProperties.Session finalSessionCfg = sessionCfg;
-        final String finalHost = operator.getHost();
-        final int finalPort = operator.getPort();
+        final SmppProperties.Operator finalOperator = operator;
         bindLoopExecutor.execute(() -> 
-            bindLoop(sessionId, finalOperatorId, finalSessionCfg, finalHost, finalPort)
+            bindLoop(sessionId, finalOperatorId, finalSessionCfg, finalOperator)
         );
         
         log.info("[{}] Session start initiated", sessionId);
@@ -632,10 +631,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
         sessionStates.put(newSessionKey, SessionState.STARTING);
         shouldRetry.put(newSessionKey, true);
         
-        String host = operator.getHost();
-        int port = operator.getPort();
-        
-        bindLoopExecutor.execute(() -> bindLoop(newSessionKey, operatorId, sessionCfg, host, port));
+        bindLoopExecutor.execute(() -> bindLoop(newSessionKey, operatorId, sessionCfg, operator));
         
         log.info("New session {} spawned for operator {}", newSessionKey, operatorId);
         return newSessionKey;
