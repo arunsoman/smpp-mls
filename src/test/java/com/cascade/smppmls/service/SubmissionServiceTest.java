@@ -31,9 +31,14 @@ class SubmissionServiceTest {
     private SubmissionService service;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         service = new SubmissionService(outboundRepository, router);
+        // Set dedupWindowMinutes since @Value isn't processed in unit tests
+        java.lang.reflect.Field windowField = SubmissionService.class.getDeclaredField("dedupWindowMinutes");
+        windowField.setAccessible(true);
+        windowField.setInt(service, 5);
     }
+
 
     @Test
     void testSubmit_NewMessage_CreatesEntity() {
@@ -44,8 +49,6 @@ class SubmissionServiceTest {
         req.setPriority("NORMAL");
         
         when(router.resolve(anyString())).thenReturn(new String[]{"AWCC", "awcc:client"});
-        
-        when(outboundRepository.findBySignature(anyString())).thenReturn(Optional.empty());
         
         SmsOutboundEntity savedEntity = new SmsOutboundEntity();
         savedEntity.setId(100L);
@@ -68,32 +71,41 @@ class SubmissionServiceTest {
     @Test
     void testSubmit_DuplicateContent_ReturnsExisting() {
         // Arrange
-        SubmitRequest req1 = new SubmitRequest();
-        req1.setMsisdn("0701234567");
-        req1.setMessage("Test Duplicate");
+        SubmitRequest req = new SubmitRequest();
+        req.setMsisdn("0701234567");
+        req.setMessage("Test Duplicate");
         
         when(router.resolve(anyString())).thenReturn(new String[]{"AWCC", "awcc:client"});
         
-        // Mock existing entity
-        SmsOutboundEntity existing = new SmsOutboundEntity();
-        existing.setId(200L);
-        existing.setMsisdn("93701234567");
-        existing.setMessage("Test Duplicate");
-        existing.setStatus("SENT");
-        existing.setSignature("dummy-signature");
-        existing.setRequestId("req-200");
+        // First call: save succeeds and populates in-memory dedup cache
+        SmsOutboundEntity savedEntity = new SmsOutboundEntity();
+        savedEntity.setId(200L);
+        savedEntity.setMsisdn("93701234567");
+        savedEntity.setMessage("Test Duplicate");
+        savedEntity.setStatus("QUEUED");
+        savedEntity.setRequestId("req-200");
         
-        when(outboundRepository.findBySignature(anyString())).thenReturn(Optional.of(existing));
+        when(outboundRepository.save(any(SmsOutboundEntity.class))).thenAnswer(invocation -> {
+            SmsOutboundEntity e = invocation.getArgument(0);
+            e.setId(200L);
+            return e;
+        });
+        
+        // First submit: creates the record
+        service.submit(req);
 
-        // Act
-        SubmitResponse resp = service.submit(req1);
+        // Second call: in-memory cache blocks it, then looks up original via findBySignature
+        when(outboundRepository.findBySignature(anyString())).thenReturn(Optional.of(savedEntity));
+        
+        // Act: second submit with same content+dest
+        SubmitResponse resp = service.submit(req);
 
         // Assert
         assertEquals("200", resp.getMessageId());
-        assertEquals("SENT", resp.getStatus());
-        // Should NOT save a new entity
-        verify(outboundRepository, never()).save(any(SmsOutboundEntity.class));
+        // save called once for first submit only
+        verify(outboundRepository, times(1)).save(any(SmsOutboundEntity.class));
     }
+
     @Test
     void testSubmit_DuplicateClientMsgId_ReturnsFirst() {
         // Arrange
