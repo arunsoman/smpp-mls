@@ -123,13 +123,15 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                     shouldRetry.put(sessionKey, true); // Auto-start sessions should retry
                     
                     // Start a dedicated bind loop for this session to handle reconnect/backoff using virtual thread
-                    bindLoopExecutor.execute(() -> bindLoop(sessionKey, operatorId, sessionCfg, operator.getHost(), operator.getPort()));
+                    bindLoopExecutor.execute(() -> bindLoop(sessionKey, operatorId, sessionCfg, operator));
                 }
             });
         });
     }
 
-    private void bindLoop(String sessionKey, String operatorId, SmppProperties.Session sessionCfg, String host, int port) {
+    private void bindLoop(String sessionKey, String operatorId, SmppProperties.Session sessionCfg, SmppProperties.Operator operator) {
+        String host = operator.getHost();
+        int port = operator.getPort();
         long backoff = Math.max(1000, smppProperties.getDefaultConfig().getReconnectDelay());
         final long maxBackoff = 60_000;
         
@@ -154,7 +156,9 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
                 // Connect and bind
                 String systemId = sessionCfg.getSystemId();
                 String password = sessionCfg.getPassword();
-                String systemType = sessionCfg.getSystemType();
+                String systemType = (sessionCfg.getSystemType() != null && !sessionCfg.getSystemType().isEmpty()) 
+                    ? sessionCfg.getSystemType() 
+                    : smppProperties.getDefaultConfig().getSystemType();
                 
                 session.connectAndBind(host, port, 
                     new BindParameter(
