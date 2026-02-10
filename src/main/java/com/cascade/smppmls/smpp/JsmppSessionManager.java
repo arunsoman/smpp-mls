@@ -393,7 +393,7 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
         if (upperText.contains("DELIVRD")) return "DELIVERED";
         if (upperText.contains("EXPIRED")) return "EXPIRED";
         if (upperText.contains("UNDELIV")) return "UNDELIVERABLE";
-        return "DLR_" + (text.length() > 20 ? text.substring(0, 20) : text);
+        return "DLR_" + (text.length() > 50 ? text.substring(0, 50) : text);
     }
 
     private String findSessionKeyForDeliverSm(DeliverSm deliverSm) {
