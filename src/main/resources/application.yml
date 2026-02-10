@@ -8,6 +8,14 @@ management:
       exposure:
         include: health,info,prometheus
 
+spring:
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+      settings:
+        web-allow-others: true  # Allow remote access (use with caution in production)
+
 smpp:
   default:
     system-type: "OTA"
