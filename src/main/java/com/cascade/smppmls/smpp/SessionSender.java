@@ -83,6 +83,10 @@ public class SessionSender implements Runnable {
                 
                 int hpSent = 0;
                 for (SmsOutboundEntity e : slice.getContent()) {
+                    // CRITICAL: Mark as SENDING *before* async dispatch to prevent re-polling
+                    e.setStatus("SENDING");
+                    outboundRepository.save(e);
+
                     submitMessageAsync(e);
                     tokens.updateAndGet(current -> Math.max(0.0, current - 1.0));
                     hpTokens.updateAndGet(current -> Math.max(0.0, current - 1.0));
@@ -101,6 +105,10 @@ public class SessionSender implements Runnable {
                 
                 int npSent = 0;
                 for (SmsOutboundEntity e : slice.getContent()) {
+                    // CRITICAL: Mark as SENDING *before* async dispatch to prevent re-polling
+                    e.setStatus("SENDING");
+                    outboundRepository.save(e);
+
                     submitMessageAsync(e);
                     tokens.updateAndGet(current -> Math.max(0.0, current - 1.0));
                     npSent++;
@@ -114,6 +122,7 @@ public class SessionSender implements Runnable {
             log.error("[{}] Error in sender tick: {}", sessionKey, ex.getMessage(), ex);
         }
     }
+
 
     private void submitMessageAsync(SmsOutboundEntity e) {
         submitExecutor.execute(() -> {
