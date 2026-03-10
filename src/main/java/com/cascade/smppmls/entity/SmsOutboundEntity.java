@@ -99,6 +99,15 @@ public class SmsOutboundEntity {
     @Column(name = "submit_response_time_ms")
     private Long submitResponseTimeMs;
 
+    @Column(name = "part_no")
+    private Integer partNo;
+
+    @Column(name = "total_parts")
+    private Integer totalParts;
+
+    @Column(name = "concat_ref_num")
+    private Integer concatRefNum;
+
     @PrePersist
     public void prePersist() {
         if (createdAt == null) createdAt = Instant.now();

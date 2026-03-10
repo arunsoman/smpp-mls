@@ -176,6 +176,29 @@ public class SessionSender implements Runnable {
                     sessionKey, sourceInfo.getAddress(), sourceInfo.getTon(), sourceInfo.getNpi(),
                     destInfo.getAddress(), destInfo.getTon(), destInfo.getNpi());
                 
+                // Prepare payload and encoding
+                byte[] textBytes;
+                GeneralDataCoding dataCoding;
+                if ("UCS2".equalsIgnoreCase(e.getEncoding())) {
+                    dataCoding = new GeneralDataCoding(Alphabet.ALPHA_UCS2, MessageClass.CLASS1, false);
+                    textBytes = e.getMessage().getBytes(StandardCharsets.UTF_16BE);
+                } else {
+                    dataCoding = new GeneralDataCoding(Alphabet.ALPHA_DEFAULT, MessageClass.CLASS1, false);
+                    textBytes = e.getMessage().getBytes(StandardCharsets.UTF_8);
+                }
+
+                byte[] payload;
+                ESMClass esmClass = new ESMClass();
+                if (e.getUdh() != null && !e.getUdh().isEmpty()) {
+                    byte[] udhBytes = com.cascade.smppmls.util.MessageSplitterUtil.hexStringToByteArray(e.getUdh());
+                    payload = new byte[udhBytes.length + textBytes.length];
+                    System.arraycopy(udhBytes, 0, payload, 0, udhBytes.length);
+                    System.arraycopy(textBytes, 0, payload, udhBytes.length, textBytes.length);
+                    esmClass = new ESMClass((byte) 0x40); // UDHI flag
+                } else {
+                    payload = textBytes;
+                }
+
                 // Submit and get response
                 var submitResult = session.submitShortMessage(
                     serviceType,
@@ -185,16 +208,16 @@ public class SessionSender implements Runnable {
                     destInfo.getTon(),
                     destInfo.getNpi(),
                     destInfo.getAddress(),
-                    new ESMClass(),
+                    esmClass,
                     (byte)0,
                     (byte)1,
                     null,
                     null,
                     new RegisteredDelivery(SMSCDeliveryReceipt.SUCCESS_FAILURE),
                     (byte)0,
-                    new GeneralDataCoding(Alphabet.ALPHA_DEFAULT, MessageClass.CLASS1, false),
+                    dataCoding,
                     (byte)0,
-                    e.getMessage().getBytes(StandardCharsets.UTF_8)
+                    payload
                 );
                 
                 long responseTime = System.currentTimeMillis() - startTime;

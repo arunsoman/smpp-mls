@@ -382,6 +382,30 @@ public class JsmppSessionManager implements SmppSessionManager, MessageReceiverL
             
             log.info("[" + sessionKey + "] Mapped DLR for outbound id={} smsc_msg_id={} mapped={}", 
                 outbound.getId(), smscId, mappedStatus);
+                
+            // Handle multipart message aggregation
+            if (outbound.getTotalParts() != null && outbound.getTotalParts() > 1 && outbound.getRequestId() != null) {
+                java.util.List<SmsOutboundEntity> allParts = outboundRepository.findAllByRequestId(outbound.getRequestId());
+                boolean anyFailed = false;
+                boolean allDelivered = true;
+                for (SmsOutboundEntity part : allParts) {
+                    String partStatus = part.getStatus();
+                    if ("UNDELIVERABLE".equals(partStatus) || "FAILED".equals(partStatus) || "EXPIRED".equals(partStatus)) {
+                        anyFailed = true;
+                    }
+                    if (!"DELIVERED".equals(partStatus)) {
+                        allDelivered = false;
+                    }
+                }
+                
+                if (anyFailed) {
+                    log.error("[{}] ALARM: Multipart message requestId={} FAILED because one or more parts failed to deliver.", sessionKey, outbound.getRequestId());
+                    meterRegistry.counter("smpp.outbound.group.failed", "session", sessionKey).increment();
+                } else if (allDelivered) {
+                    log.info("[{}] Multipart message requestId={} completely DELIVERED", sessionKey, outbound.getRequestId());
+                    meterRegistry.counter("smpp.outbound.group.delivered", "session", sessionKey).increment();
+                }
+            }
         } else {
             log.warn("[" + sessionKey + "] Could not find outbound for smsc_msg_id={}", smscId);
         }

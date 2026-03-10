@@ -47,4 +47,7 @@ public interface SmsOutboundRepository extends JpaRepository<SmsOutboundEntity, 
 
     // count by status and operator (for per-operator retry stats)
     long countByStatusAndOperator(String status, String operator);
+    
+    // Find all parts of a concatenated message or a single message by requestId
+    java.util.List<SmsOutboundEntity> findAllByRequestId(String requestId);
 }

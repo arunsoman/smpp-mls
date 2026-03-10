@@ -133,23 +133,50 @@ public class SubmissionService {
 
         // ── Persist new message ──
         String requestId = UUID.randomUUID().toString();
-        SmsOutboundEntity entity = SmsOutboundEntity.builder()
-                .requestId(requestId)
-                .clientMsgId(req.getClientMsgId())
-                .msisdn(normalized)
-                .message(rawMessage) // Store RAW message
-                .signature(signature)
-                .priority(req.getPriority())
-                .operator(operator)
-                .sessionId(sessionId)
-                .status("QUEUED")
-                .build();
+        
+        // Generate a random 16-bit reference number for concatenation (1 to 65535)
+        int concatRefNum = new java.util.Random().nextInt(65535) + 1;
+        
+        // Determine if we need to force UCS2 based on request encoding
+        boolean forceUcs2 = "UCS2".equalsIgnoreCase(req.getEncoding()) || "UNICODE".equalsIgnoreCase(req.getEncoding());
+        
+        java.util.List<com.cascade.smppmls.util.MessageSplitterUtil.MessagePart> parts = 
+            com.cascade.smppmls.util.MessageSplitterUtil.splitMessage(rawMessage, forceUcs2, concatRefNum);
+            
+        SmsOutboundEntity firstSaved = null;
+        
+        for (com.cascade.smppmls.util.MessageSplitterUtil.MessagePart part : parts) {
+            String partClientMsgId = req.getClientMsgId();
+            if (partClientMsgId != null && !partClientMsgId.isBlank() && parts.size() > 1) {
+                partClientMsgId = partClientMsgId + "_p" + part.partNo;
+            }
+            
+            SmsOutboundEntity entity = SmsOutboundEntity.builder()
+                    .requestId(requestId)
+                    .clientMsgId(partClientMsgId)
+                    .msisdn(normalized)
+                    .message(part.text) // Store the chunk
+                    .signature(signature)
+                    .priority(req.getPriority())
+                    .operator(operator)
+                    .sessionId(sessionId)
+                    .status("QUEUED")
+                    .encoding(part.encoding)
+                    .udh(part.udh != null ? com.cascade.smppmls.util.MessageSplitterUtil.bytesToHex(part.udh) : null)
+                    .partNo(part.partNo)
+                    .totalParts(part.totalParts)
+                    .concatRefNum(part.totalParts > 1 ? part.concatRefNum : null)
+                    .build();
 
-        SmsOutboundEntity saved = outboundRepository.save(entity);
-        log.info("Persisted outbound message id={} requestId={} -> {} (operator={}, session={})",
-            saved.getId(), saved.getRequestId(), normalized, operator, sessionId);
+            SmsOutboundEntity saved = outboundRepository.save(entity);
+            if (firstSaved == null) {
+                firstSaved = saved;
+            }
+            log.info("Persisted outbound message part {}/{} id={} requestId={} -> {} (operator={}, session={})",
+                part.partNo, part.totalParts, saved.getId(), saved.getRequestId(), normalized, operator, sessionId);
+        }
 
-        String messageId = saved.getId() != null ? String.valueOf(saved.getId()) : requestId;
+        String messageId = firstSaved != null && firstSaved.getId() != null ? String.valueOf(firstSaved.getId()) : requestId;
         return new SubmitResponse(requestId, messageId, "QUEUED", operator, sessionId);
     }
 

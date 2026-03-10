@@ -176,6 +176,7 @@ class SubmissionServiceTest {
         original.setId(500L);
         original.setStatus("QUEUED");
         original.setSignature("dummy-signature"); // In real life, would be same hash
+        original.setRequestId("orig-req-id"); // Prevent saving to generate a new requestId in toResponse
         // The service finds the signature in cache, so it blocks.
         // It then tries to find the original record by signature.
         // We need to mock that findBySignature call if we want a nice response.
@@ -188,5 +189,56 @@ class SubmissionServiceTest {
         assertEquals("500", resp.getMessageId());
         // save called once for first submit only
         verify(outboundRepository, times(1)).save(any(SmsOutboundEntity.class));
+    }
+
+    @Test
+    void testSubmit_Multipart_CreatesMultipleEntities() {
+        // Arrange
+        SubmitRequest req = new SubmitRequest();
+        req.setMsisdn("0701234567");
+        req.setClientMsgId("my-long-msg");
+        // A long message to force splitting (e.g., 200 characters of English = 2 parts GSM)
+        req.setMessage("A".repeat(200)); 
+        
+        when(router.resolve(anyString())).thenReturn(new String[]{"AWCC", "awcc:client"});
+        
+        // Mock save
+        when(outboundRepository.save(any(SmsOutboundEntity.class))).thenAnswer(invocation -> {
+            SmsOutboundEntity e = invocation.getArgument(0);
+            e.setId(System.nanoTime()); // dummy unique id
+            return e;
+        });
+
+        // Act
+        SubmitResponse resp = service.submit(req);
+
+        // Assert
+        assertNotNull(resp);
+        // Should return the request id as the messageId for multipart
+        assertNotNull(resp.getMessageId());
+        
+        // Verify save was called 2 times (200 chars / 153 chars per part = 2 parts)
+        org.mockito.ArgumentCaptor<SmsOutboundEntity> captor = org.mockito.ArgumentCaptor.forClass(SmsOutboundEntity.class);
+        verify(outboundRepository, times(2)).save(captor.capture());
+        
+        java.util.List<SmsOutboundEntity> savedParts = captor.getAllValues();
+        assertEquals(2, savedParts.size());
+        
+        SmsOutboundEntity part1 = savedParts.get(0);
+        SmsOutboundEntity part2 = savedParts.get(1);
+        
+        assertEquals(1, part1.getPartNo());
+        assertEquals(2, part1.getTotalParts());
+        assertEquals("my-long-msg_p1", part1.getClientMsgId());
+        assertNotNull(part1.getConcatRefNum());
+        assertEquals(resp.getRequestId(), part1.getRequestId());
+        
+        assertEquals(2, part2.getPartNo());
+        assertEquals(2, part2.getTotalParts());
+        assertEquals("my-long-msg_p2", part2.getClientMsgId());
+        assertEquals(part1.getConcatRefNum(), part2.getConcatRefNum());
+        assertEquals(resp.getRequestId(), part2.getRequestId());
+        
+        assertEquals(part1.getSignature(), part2.getSignature()); // Signatures should be identical (hash of full message)
     }
 }
